@@ -1,0 +1,40 @@
+[workspace]
+members = [
+    "core",
+    "derive",
+    "cli",
+    "examples/mysql_example",
+    "examples/postgres_example",
+    "examples/sqlite_example",
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["fangbc5@163.com"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# 数据库
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono"], default-features = false }
+
+# 异步运行时
+tokio = { version = "1.40", features = ["full"] }
+
+# 工具
+async-trait = "0.1"
+thiserror = "2.0.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# CLI 工具
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+
+# Proc-macro 工具
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+

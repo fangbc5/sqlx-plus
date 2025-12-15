@@ -1,0 +1,20 @@
+[package]
+name = "sqlx-plus-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["fangbc5@163.com"]
+license = "MIT OR Apache-2.0"
+description = "Code generator for sqlx-plus"
+
+[[bin]]
+name = "sqlx-plus-cli"
+path = "src/main.rs"
+
+[dependencies]
+sqlx = { workspace = true, features = ["mysql", "postgres", "sqlite"] }
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+

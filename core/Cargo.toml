@@ -1,0 +1,21 @@
+[package]
+name = "sqlx-plus-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["fangbc5@163.com"]
+license = "MIT OR Apache-2.0"
+description = "Core library for sqlx-plus"
+
+[dependencies]
+sqlx = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[features]
+default = ["mysql", "postgres", "sqlite"]
+mysql = ["sqlx/mysql"]
+postgres = ["sqlx/postgres"]
+sqlite = ["sqlx/sqlite"]
+

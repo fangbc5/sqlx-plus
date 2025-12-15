@@ -1,0 +1,14 @@
+[package]
+name = "postgres-example"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqlx-plus-core = { path = "../../core", features = ["postgres"] }
+sqlx-plus-derive = { path = "../../derive" }
+async-trait = { workspace = true }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "postgres"] }
+tokio = { version = "1.40", features = ["full"] }
+dotenvy = "0.15"
+anyhow = "1.0"
+

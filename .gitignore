@@ -1,0 +1,70 @@
+## === Rust 通用忽略 ===
+target/
+debug/
+release/
+Cargo.lock
+
+## Cargo 构建输出（workspace 下所有 crate）
+**/target/
+
+## Rust 工具链本地配置
+.rustup/
+.cargo/
+
+## === IDE / 编辑器 ===
+
+# VS Code
+.vscode/
+.history/
+
+# Cursor
+.cursor/
+.cursorignore
+
+# IntelliJ / CLion / IDEA / RustRover
+.idea/
+*.iml
+out/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+## === 操作系统文件 ===
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+## === 日志 / 临时文件 ===
+*.log
+*.tmp
+*.swp
+*.swo
+
+## === 测试 / 覆盖率输出 ===
+coverage/
+lcov.info
+*.profraw
+*.profdata
+
+## === 其他常见工具 ===
+
+# Node / npm / pnpm / yarn（如果以后有前端子项目）
+node_modules/
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+
+# Python（若临时写脚本）
+__pycache__/
+*.py[cod]
+*.pyo
+
+
