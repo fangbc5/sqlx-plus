@@ -63,29 +63,24 @@
 - 支持参数绑定（防止 SQL 注入）
 - 支持 COUNT 查询转换 (`into_count_sql`)
 - 支持分页 SQL 生成 (`into_paginated_sql`)
+- 支持 `limit(n)` / `offset(n)` 链式方法（作用于 `into_sql`）
 - 支持多种数据库驱动（MySQL, PostgreSQL, SQLite），自动转换占位符格式
 
 ## 缺失的重要功能
 
 ### 🟡 中优先级（有用功能）
 
-1. **LIMIT / OFFSET 直接方法**
-   - 虽然 `into_paginated_sql` 支持，但缺少直接设置的方法
-   - 需要：`limit(n)`, `offset(n)` 方法
-
-### 🟡 中优先级（有用功能）
-
-7. **GROUP BY**
+1. **GROUP BY**
 
    - 缺少分组查询
    - 需要：`group_by(field)` 方法
 
-8. **HAVING**
+2. **HAVING**
 
    - 缺少分组后条件过滤
    - 需要：`having()` 方法
 
-9. **JOIN 支持**
+3. **JOIN 支持**
 
    - 缺少表连接
    - 需要：
@@ -94,58 +89,58 @@
      - `right_join(table, condition)`
      - `full_join(table, condition)`
 
-10. **子查询支持**
+4. **子查询支持**
 
-    - 缺少子查询功能
-    - 需要：支持在条件中使用子查询
+   - 缺少子查询功能
+   - 需要：支持在条件中使用子查询
 
-11. **EXISTS / NOT EXISTS**
+5. **EXISTS / NOT EXISTS**
 
-    - 缺少存在性查询
-    - 需要：`and_exists(subquery)`, `and_not_exists(subquery)`
+   - 缺少存在性查询
+   - 需要：`and_exists(subquery)`, `and_not_exists(subquery)`
 
-12. **正则表达式**
-    - 缺少正则匹配（MySQL REGEXP, PostgreSQL ~）
-    - 需要：`and_regexp(field, pattern)`
+6. **正则表达式**
+   - 缺少正则匹配（MySQL REGEXP, PostgreSQL ~）
+   - 需要：`and_regexp(field, pattern)`
 
 ### 🟢 低优先级（高级功能）
 
-13. **字段选择**
+7. **字段选择**
 
-    - 当前只能使用 `SELECT *`
-    - 需要：`select(fields)` 方法，支持选择特定字段
+   - 当前只能使用 `SELECT *`
+   - 需要：`select(fields)` 方法，支持选择特定字段
 
-14. **字段别名**
+8. **字段别名**
 
-    - 缺少字段别名支持
-    - 需要：`select_as(field, alias)` 方法
+   - 缺少字段别名支持
+   - 需要：`select_as(field, alias)` 方法
 
-15. **聚合函数**
+9. **聚合函数**
 
-    - 缺少聚合函数支持（COUNT, SUM, AVG, MAX, MIN）
-    - 需要：在 SELECT 中支持聚合函数
+   - 缺少聚合函数支持（COUNT, SUM, AVG, MAX, MIN）
+   - 需要：在 SELECT 中支持聚合函数
 
-16. **UNION**
+10. **UNION**
 
     - 缺少 UNION 查询
     - 需要：`union(other_builder)` 方法
 
-17. **日期时间函数**
+11. **日期时间函数**
 
     - 缺少日期时间函数支持
     - 需要：`and_date_eq()`, `and_date_between()` 等
 
-18. **条件组合优化**
+12. **条件组合优化**
 
     - 当前条件都是线性添加
     - 需要：支持条件分组，如 `(A OR B) AND (C OR D)`
 
-19. **DISTINCT**
+13. **DISTINCT**
 
     - 缺少去重查询
     - 需要：`distinct()` 方法
 
-20. **CASE WHEN**
+14. **CASE WHEN**
     - 缺少条件表达式
     - 需要：支持 CASE WHEN 语句
 
@@ -161,10 +156,9 @@
 
 ### Phase 2: 常用功能（短期实现）
 
-6. LIMIT / OFFSET 直接方法
-7. GROUP BY
-8. HAVING
-9. EXISTS / NOT EXISTS
+6. GROUP BY
+7. HAVING
+8. EXISTS / NOT EXISTS
 
 ### Phase 3: 高级功能（长期规划）
 

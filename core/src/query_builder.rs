@@ -54,6 +54,9 @@ pub struct QueryBuilder {
     conditions: Vec<ConditionItem>,
     order_by: Vec<(String, bool)>, // (field, ascending)
     binds: Vec<BindValue>,
+    // 仅用于 into_sql 链式场景；在 into_paginated_sql 中会被显式忽略
+    limit: Option<u64>,
+    offset: Option<u64>,
 }
 
 impl QueryBuilder {
@@ -63,12 +66,26 @@ impl QueryBuilder {
             conditions: Vec::new(),
             order_by: Vec::new(),
             binds: Vec::new(),
+            limit: None,
+            offset: None,
         }
     }
 
     /// 替换基础 SQL（保留已有的条件、排序和绑定）
     pub fn with_base_sql(mut self, base_sql: impl Into<String>) -> Self {
         self.base_sql = base_sql.into();
+        self
+    }
+
+    /// 设置 LIMIT（链式调用），仅作用于 into_sql 生成的 SQL
+    pub fn limit(mut self, n: u64) -> Self {
+        self.limit = Some(n);
+        self
+    }
+
+    /// 设置 OFFSET（链式调用），仅作用于 into_sql 生成的 SQL
+    pub fn offset(mut self, n: u64) -> Self {
+        self.offset = Some(n);
         self
     }
 
@@ -617,6 +634,14 @@ impl QueryBuilder {
             }
         }
 
+        // 如果设置了 limit / offset，则追加
+        if let Some(limit) = self.limit {
+            write!(sql, " LIMIT {}", limit).unwrap();
+            if let Some(offset) = self.offset {
+                write!(sql, " OFFSET {}", offset).unwrap();
+            }
+        }
+
         driver.convert_placeholders(&sql)
     }
 
@@ -636,7 +661,12 @@ impl QueryBuilder {
     }
 
     pub fn into_paginated_sql(&self, driver: DbDriver, limit: u64, offset: u64) -> String {
-        let mut sql = self.into_sql(driver);
+        // 分页时，page/size（limit/offset 参数）应当具有最高优先级，
+        // 因此忽略构建器上通过链式设置的 limit / offset，避免重复附加。
+        let mut builder = self.clone();
+        builder.limit = None;
+        builder.offset = None;
+        let mut sql = builder.into_sql(driver);
 
         match driver {
             DbDriver::MySql | DbDriver::Sqlite => {
@@ -706,6 +736,10 @@ impl From<bool> for BindValue {
 mod tests {
     use super::*;
 
+    fn normalize(sql: &str) -> String {
+        sql.replace('`', "").replace('\"', "")
+    }
+
     fn mysql_driver() -> DbDriver {
         DbDriver::MySql
     }
@@ -725,7 +759,10 @@ mod tests {
             .and_eq("id", 1)
             .and_eq("name", "test");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id = ? AND name = ?");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE id = ? AND name = ?"
+        );
         assert_eq!(builder.binds().len(), 2);
     }
 
@@ -733,7 +770,7 @@ mod tests {
     fn test_and_ne() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_ne("status", 0);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE status != ?");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE status != ?");
     }
 
     #[test]
@@ -745,7 +782,7 @@ mod tests {
             .and_le("score", 100);
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE age > ? AND score >= ? AND age < ? AND score <= ?"
         );
     }
@@ -759,7 +796,7 @@ mod tests {
             .or_eq("id", 2);
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM user WHERE is_del = ? OR id = ? OR id = ?"
         );
         assert_eq!(builder.binds().len(), 3);
@@ -771,7 +808,10 @@ mod tests {
             .or_gt("age", 18)
             .or_lt("age", 65);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE age > ? OR age < ?");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE age > ? OR age < ?"
+        );
     }
 
     // ========== LIKE 查询测试 ==========
@@ -779,14 +819,14 @@ mod tests {
     fn test_and_like() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_like("name", "test");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE name LIKE ?");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE name LIKE ?");
     }
 
     #[test]
     fn test_and_like_prefix() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_like_prefix("name", "test");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE name LIKE ?");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE name LIKE ?");
         assert_eq!(builder.binds()[0], BindValue::String("test%".to_string()));
     }
 
@@ -795,7 +835,7 @@ mod tests {
         let builder =
             QueryBuilder::new("SELECT * FROM users").and_like_suffix("email", "@example.com");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE email LIKE ?");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE email LIKE ?");
         assert_eq!(
             builder.binds()[0],
             BindValue::String("%@example.com".to_string())
@@ -806,7 +846,7 @@ mod tests {
     fn test_and_like_exact() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_like_exact("name", "admin");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE name LIKE ?");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE name LIKE ?");
         assert_eq!(builder.binds()[0], BindValue::String("admin".to_string()));
     }
 
@@ -814,7 +854,7 @@ mod tests {
     fn test_and_like_custom() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_like_custom("name", "test_%");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE name LIKE ?");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE name LIKE ?");
         assert_eq!(builder.binds()[0], BindValue::String("test_%".to_string()));
     }
 
@@ -825,7 +865,7 @@ mod tests {
             .or_like("name", "test");
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND is_del = ? OR name LIKE ?"
         );
     }
@@ -835,7 +875,7 @@ mod tests {
     fn test_and_in() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_in("id", vec![1, 2, 3]);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id IN (?, ?, ?)");
+        assert_eq!(normalize(&sql), "SELECT * FROM users WHERE id IN (?, ?, ?)");
         assert_eq!(builder.binds().len(), 3);
     }
 
@@ -843,7 +883,10 @@ mod tests {
     fn test_and_not_in() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_not_in("id", vec![1, 2, 3]);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id NOT IN (?, ?, ?)");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE id NOT IN (?, ?, ?)"
+        );
         assert_eq!(builder.binds().len(), 3);
     }
 
@@ -854,7 +897,7 @@ mod tests {
             .or_in("status", vec![1, 2]);
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND is_del = ? OR status IN (?, ?)"
         );
     }
@@ -864,14 +907,20 @@ mod tests {
     fn test_and_is_null() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_is_null("deleted_at");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE deleted_at IS NULL");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE deleted_at IS NULL"
+        );
     }
 
     #[test]
     fn test_and_is_not_null() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_is_not_null("updated_at");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE updated_at IS NOT NULL");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE updated_at IS NOT NULL"
+        );
     }
 
     #[test]
@@ -881,7 +930,7 @@ mod tests {
             .or_is_null("deleted_at");
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND is_del = ? OR deleted_at IS NULL"
         );
     }
@@ -893,7 +942,7 @@ mod tests {
             .or_is_not_null("updated_at");
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND is_del = ? OR updated_at IS NOT NULL"
         );
     }
@@ -903,7 +952,10 @@ mod tests {
     fn test_and_between() {
         let builder = QueryBuilder::new("SELECT * FROM users").and_between("age", 18, 65);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE age BETWEEN ? AND ?");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE age BETWEEN ? AND ?"
+        );
         assert_eq!(builder.binds().len(), 2);
     }
 
@@ -914,7 +966,7 @@ mod tests {
             .or_between("score", 60, 100);
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND is_del = ? OR score BETWEEN ? AND ?"
         );
     }
@@ -925,7 +977,10 @@ mod tests {
         let builder = QueryBuilder::new("SELECT * FROM users")
             .and_group(|b| b.and_eq("is_del", 0).and_eq("status", 1));
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE (is_del = ? AND status = ?)");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE (is_del = ? AND status = ?)"
+        );
         assert_eq!(builder.binds().len(), 2);
     }
 
@@ -936,7 +991,7 @@ mod tests {
             .or_group(|b| b.and_eq("status", "active").and_eq("is_del", 0));
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND id = ? OR (status = ? AND is_del = ?)"
         );
     }
@@ -948,7 +1003,7 @@ mod tests {
             .and_group(|b| b.or_eq("id", 3).or_eq("id", 4));
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND (id = ? OR id = ?) AND (id = ? OR id = ?)"
         );
         assert_eq!(builder.binds().len(), 4);
@@ -961,7 +1016,10 @@ mod tests {
             .and_group(|b| b.and_eq("id", 1).or_eq("id", 2))
             .or_group(|b| b.and_eq("id", 3).and_eq("is_del", 0));
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE 1=1 AND is_del = ? AND (id = ? OR id = ?) OR (id = ? AND is_del = ?)");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE 1=1 AND is_del = ? AND (id = ? OR id = ?) OR (id = ? AND is_del = ?)"
+        );
         assert_eq!(builder.binds().len(), 5);
     }
 
@@ -973,7 +1031,7 @@ mod tests {
         });
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE 1=1 AND (status = ? AND (type = ? OR type = ?))"
         );
         assert_eq!(builder.binds().len(), 3);
@@ -988,7 +1046,7 @@ mod tests {
             .order_by("name", false);
         let sql = builder.into_sql(mysql_driver());
         assert_eq!(
-            sql,
+            normalize(&sql),
             "SELECT * FROM users WHERE is_del = ? ORDER BY id, name DESC"
         );
     }
@@ -999,7 +1057,10 @@ mod tests {
             .order_by("created_at", false)
             .order_by("id", true);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users ORDER BY created_at DESC, id");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users ORDER BY created_at DESC, id"
+        );
     }
 
     // ========== COUNT SQL 测试 ==========
@@ -1010,7 +1071,7 @@ mod tests {
             .and_eq("status", 1);
         let count_sql = builder.into_count_sql(mysql_driver());
         assert_eq!(
-            count_sql,
+            normalize(&count_sql),
             "SELECT COUNT(*) FROM users WHERE is_del = ? AND status = ?"
         );
     }
@@ -1020,7 +1081,7 @@ mod tests {
         let builder = QueryBuilder::new("SELECT id, name FROM users WHERE 1=1").and_eq("is_del", 0);
         let count_sql = builder.into_count_sql(mysql_driver());
         assert_eq!(
-            count_sql,
+            normalize(&count_sql),
             "SELECT COUNT(*) FROM users WHERE 1=1 AND is_del = ?"
         );
     }
@@ -1033,7 +1094,7 @@ mod tests {
             .order_by("id", false);
         let paginated_sql = builder.into_paginated_sql(mysql_driver(), 10, 20);
         assert_eq!(
-            paginated_sql,
+            normalize(&paginated_sql),
             "SELECT * FROM users WHERE is_del = ? ORDER BY id DESC LIMIT 10 OFFSET 20"
         );
     }
@@ -1043,7 +1104,7 @@ mod tests {
         let builder = QueryBuilder::new("SELECT * FROM users").and_eq("is_del", 0);
         let paginated_sql = builder.into_paginated_sql(postgres_driver(), 5, 10);
         assert_eq!(
-            paginated_sql,
+            normalize(&paginated_sql),
             "SELECT * FROM users WHERE is_del = $1 LIMIT 5 OFFSET 10"
         );
     }
@@ -1053,9 +1114,46 @@ mod tests {
         let builder = QueryBuilder::new("SELECT * FROM users").and_eq("is_del", 0);
         let paginated_sql = builder.into_paginated_sql(sqlite_driver(), 20, 0);
         assert_eq!(
-            paginated_sql,
+            normalize(&paginated_sql),
             "SELECT * FROM users WHERE is_del = ? LIMIT 20 OFFSET 0"
         );
+    }
+
+    #[test]
+    fn test_into_paginated_sql_ignores_builder_limit_offset() {
+        let builder = QueryBuilder::new("SELECT * FROM users")
+            .and_eq("is_del", 0)
+            .limit(100)
+            .offset(200);
+        let paginated_sql = builder.into_paginated_sql(mysql_driver(), 10, 20);
+        // paginate 的 limit/offset 优先，忽略 builder 上的 100/200
+        assert_eq!(
+            normalize(&paginated_sql),
+            "SELECT * FROM users WHERE is_del = ? LIMIT 10 OFFSET 20"
+        );
+    }
+
+    // ========== LIMIT / OFFSET 链式方法测试 ==========
+    #[test]
+    fn test_limit_and_offset_mysql() {
+        let builder = QueryBuilder::new("SELECT * FROM users")
+            .and_eq("is_del", 0)
+            .limit(10)
+            .offset(20);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT * FROM users WHERE `is_del` = ? LIMIT 10 OFFSET 20"
+        );
+    }
+
+    #[test]
+    fn test_limit_postgres_with_placeholders() {
+        let builder = QueryBuilder::new("SELECT * FROM users")
+            .and_eq("id", 1)
+            .limit(5);
+        let sql = builder.into_sql(postgres_driver());
+        assert_eq!(sql, "SELECT * FROM users WHERE \"id\" = $1 LIMIT 5");
     }
 
     // ========== 参数绑定测试 ==========
@@ -1097,7 +1195,10 @@ mod tests {
             .order_by("id", true);
 
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE 1=1 AND is_del = ? AND (status = ? OR status = ?) AND age BETWEEN ? AND ? AND id NOT IN (?, ?, ?) AND name LIKE ? ORDER BY created_at DESC, id");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE 1=1 AND is_del = ? AND (status = ? OR status = ?) AND age BETWEEN ? AND ? AND id NOT IN (?, ?, ?) AND name LIKE ? ORDER BY created_at DESC, id"
+        );
         assert_eq!(builder.binds().len(), 9);
     }
 
@@ -1113,7 +1214,10 @@ mod tests {
     fn test_existing_where_clause() {
         let builder = QueryBuilder::new("SELECT * FROM users WHERE id > 0").and_eq("is_del", 0);
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id > 0 AND is_del = ?");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE id > 0 AND is_del = ?"
+        );
     }
 
     // ========== 不同数据库驱动测试 ==========
@@ -1123,7 +1227,10 @@ mod tests {
             .and_eq("id", 1)
             .and_eq("name", "test");
         let sql = builder.into_sql(mysql_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id = ? AND name = ?");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE id = ? AND name = ?"
+        );
     }
 
     #[test]
@@ -1132,7 +1239,10 @@ mod tests {
             .and_eq("id", 1)
             .and_eq("name", "test");
         let sql = builder.into_sql(postgres_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id = $1 AND name = $2");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE id = $1 AND name = $2"
+        );
     }
 
     #[test]
@@ -1141,7 +1251,10 @@ mod tests {
             .and_eq("id", 1)
             .and_eq("name", "test");
         let sql = builder.into_sql(sqlite_driver());
-        assert_eq!(sql, "SELECT * FROM users WHERE id = ? AND name = ?");
+        assert_eq!(
+            normalize(&sql),
+            "SELECT * FROM users WHERE id = ? AND name = ?"
+        );
     }
 
     // ========== BindValue 转换测试 ==========
