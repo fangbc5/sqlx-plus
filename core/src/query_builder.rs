@@ -37,12 +37,142 @@ enum ConditionType {
     Or,
 }
 
+/// SQL 操作符枚举
+#[derive(Debug, Clone, PartialEq)]
+enum Operator {
+    /// 等于: =
+    Eq,
+    /// 不等于: !=
+    Ne,
+    /// 大于: >
+    Gt,
+    /// 大于等于: >=
+    Ge,
+    /// 小于: <
+    Lt,
+    /// 小于等于: <=
+    Le,
+    /// LIKE 匹配
+    Like,
+    /// IS NULL
+    IsNull,
+    /// IS NOT NULL
+    IsNotNull,
+    /// IN 查询: IN (?, ?, ...)
+    /// 参数: (start_index, end_index) - 绑定值的索引范围
+    In(usize, usize),
+    /// NOT IN 查询: NOT IN (?, ?, ...)
+    /// 参数: (start_index, end_index) - 绑定值的索引范围
+    NotIn(usize, usize),
+    /// BETWEEN 查询: BETWEEN ? AND ?
+    /// 参数: (start_index, end_index) - 绑定值的索引范围（通常是 start_index 和 start_index+1）
+    Between(usize, usize),
+    /// 正则表达式匹配（MySQL: REGEXP, PostgreSQL: ~）
+    RegExp,
+}
+
+impl Operator {
+    /// 将操作符转换为 SQL 字符串
+    fn to_sql(&self, driver: DbDriver, bind_index: &mut usize) -> String {
+        match self {
+            Operator::Eq => {
+                let sql = format!("= {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::Ne => {
+                let sql = format!("!= {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::Gt => {
+                let sql = format!("> {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::Ge => {
+                let sql = format!(">= {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::Lt => {
+                let sql = format!("< {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::Le => {
+                let sql = format!("<= {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::Like => {
+                let sql = format!("LIKE {}", driver.placeholder(*bind_index));
+                *bind_index += 1;
+                sql
+            }
+            Operator::IsNull => "IS NULL".to_string(),
+            Operator::IsNotNull => "IS NOT NULL".to_string(),
+            Operator::In(start, end) => {
+                let mut sql = "IN (".to_string();
+                let mut first = true;
+                for _ in *start..*end {
+                    if !first {
+                        sql.push_str(", ");
+                    }
+                    first = false;
+                    sql.push_str(&driver.placeholder(*bind_index));
+                    *bind_index += 1;
+                }
+                sql.push(')');
+                sql
+            }
+            Operator::NotIn(start, end) => {
+                let mut sql = "NOT IN (".to_string();
+                let mut first = true;
+                for _ in *start..*end {
+                    if !first {
+                        sql.push_str(", ");
+                    }
+                    first = false;
+                    sql.push_str(&driver.placeholder(*bind_index));
+                    *bind_index += 1;
+                }
+                sql.push(')');
+                sql
+            }
+            Operator::Between(_start, _end) => {
+                let sql = format!(
+                    "BETWEEN {} AND {}",
+                    driver.placeholder(*bind_index),
+                    driver.placeholder(*bind_index + 1)
+                );
+                *bind_index += 2;
+                sql
+            }
+            Operator::RegExp => {
+                // 根据数据库类型生成不同的正则表达式语法
+                let sql = match driver {
+                    DbDriver::MySql => format!("REGEXP {}", driver.placeholder(*bind_index)),
+                    DbDriver::Postgres => format!("~ {}", driver.placeholder(*bind_index)),
+                    DbDriver::Sqlite => {
+                        // SQLite 不支持原生正则表达式
+                        // 可以使用 LIKE 作为替代，但这不是真正的正则表达式
+                        format!("REGEXP {}", driver.placeholder(*bind_index))
+                    }
+                };
+                *bind_index += 1;
+                sql
+            }
+        }
+    }
+}
+
 /// 条件项：可以是单个条件或条件组
 #[derive(Debug, Clone)]
 enum ConditionItem {
     /// 单个条件：(field, operator, condition_type)
     /// 注意：绑定值存储在 QueryBuilder 的 binds 字段中，不在此处
-    Single(String, String, ConditionType),
+    Single(String, Operator, ConditionType),
     /// 条件组：(嵌套的 QueryBuilder, condition_type)
     Group(Box<QueryBuilder>, ConditionType),
 }
@@ -107,7 +237,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.having_conditions.push(ConditionItem::Single(
             field.to_string(),
-            "=".to_string(),
+            Operator::Eq,
             ConditionType::And,
         ));
         self.having_binds.push(bind_value);
@@ -119,7 +249,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.having_conditions.push(ConditionItem::Single(
             field.to_string(),
-            "!=".to_string(),
+            Operator::Ne,
             ConditionType::And,
         ));
         self.having_binds.push(bind_value);
@@ -131,7 +261,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.having_conditions.push(ConditionItem::Single(
             field.to_string(),
-            ">".to_string(),
+            Operator::Gt,
             ConditionType::And,
         ));
         self.having_binds.push(bind_value);
@@ -143,7 +273,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.having_conditions.push(ConditionItem::Single(
             field.to_string(),
-            ">=".to_string(),
+            Operator::Ge,
             ConditionType::And,
         ));
         self.having_binds.push(bind_value);
@@ -155,7 +285,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.having_conditions.push(ConditionItem::Single(
             field.to_string(),
-            "<".to_string(),
+            Operator::Lt,
             ConditionType::And,
         ));
         self.having_binds.push(bind_value);
@@ -167,7 +297,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.having_conditions.push(ConditionItem::Single(
             field.to_string(),
-            "<=".to_string(),
+            Operator::Le,
             ConditionType::And,
         ));
         self.having_binds.push(bind_value);
@@ -178,7 +308,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "=".to_string(),
+            Operator::Eq,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -189,7 +319,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "!=".to_string(),
+            Operator::Ne,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -200,7 +330,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            ">".to_string(),
+            Operator::Gt,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -211,7 +341,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            ">=".to_string(),
+            Operator::Ge,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -222,7 +352,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "<".to_string(),
+            Operator::Lt,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -233,7 +363,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "<=".to_string(),
+            Operator::Le,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -245,7 +375,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "=".to_string(),
+            Operator::Eq,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -256,7 +386,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "!=".to_string(),
+            Operator::Ne,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -267,7 +397,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            ">".to_string(),
+            Operator::Gt,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -278,7 +408,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            ">=".to_string(),
+            Operator::Ge,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -289,7 +419,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "<".to_string(),
+            Operator::Lt,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -300,7 +430,7 @@ impl QueryBuilder {
         let bind_value = value.into();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "<=".to_string(),
+            Operator::Le,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -312,7 +442,7 @@ impl QueryBuilder {
         let bind_value = BindValue::String(format!("%{}%", s));
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "LIKE".to_string(),
+            Operator::Like,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -325,7 +455,7 @@ impl QueryBuilder {
         let bind_value = BindValue::String(format!("{}%", s));
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "LIKE".to_string(),
+            Operator::Like,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -338,7 +468,7 @@ impl QueryBuilder {
         let bind_value = BindValue::String(format!("%{}", s));
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "LIKE".to_string(),
+            Operator::Like,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -351,7 +481,7 @@ impl QueryBuilder {
         let bind_value = BindValue::String(s);
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "LIKE".to_string(),
+            Operator::Like,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -364,7 +494,7 @@ impl QueryBuilder {
         let bind_value = BindValue::String(s);
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "LIKE".to_string(),
+            Operator::Like,
             ConditionType::And,
         ));
         self.binds.push(bind_value);
@@ -376,7 +506,39 @@ impl QueryBuilder {
         let bind_value = BindValue::String(format!("%{}%", s));
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "LIKE".to_string(),
+            Operator::Like,
+            ConditionType::Or,
+        ));
+        self.binds.push(bind_value);
+        self
+    }
+
+    /// 正则表达式匹配（AND 条件）
+    /// MySQL: field REGEXP pattern
+    /// PostgreSQL: field ~ pattern
+    /// SQLite: 不支持原生正则表达式（会抛出错误）
+    pub fn and_regexp(mut self, field: &str, pattern: impl Into<String>) -> Self {
+        let s = pattern.into();
+        let bind_value = BindValue::String(s);
+        self.conditions.push(ConditionItem::Single(
+            field.to_string(),
+            Operator::RegExp,
+            ConditionType::And,
+        ));
+        self.binds.push(bind_value);
+        self
+    }
+
+    /// 正则表达式匹配（OR 条件）
+    /// MySQL: field REGEXP pattern
+    /// PostgreSQL: field ~ pattern
+    /// SQLite: 不支持原生正则表达式（会抛出错误）
+    pub fn or_regexp(mut self, field: &str, pattern: impl Into<String>) -> Self {
+        let s = pattern.into();
+        let bind_value = BindValue::String(s);
+        self.conditions.push(ConditionItem::Single(
+            field.to_string(),
+            Operator::RegExp,
             ConditionType::Or,
         ));
         self.binds.push(bind_value);
@@ -393,7 +555,7 @@ impl QueryBuilder {
         // 存储 IN 子句的起始和结束索引
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            format!("IN({},{})", start_index, end_index),
+            Operator::In(start_index, end_index),
             ConditionType::And,
         ));
         self
@@ -410,7 +572,7 @@ impl QueryBuilder {
         // 存储 NOT IN 子句的起始和结束索引
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            format!("NOT_IN({},{})", start_index, end_index),
+            Operator::NotIn(start_index, end_index),
             ConditionType::And,
         ));
         self
@@ -425,7 +587,7 @@ impl QueryBuilder {
         let end_index = self.binds.len();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            format!("IN({},{})", start_index, end_index),
+            Operator::In(start_index, end_index),
             ConditionType::Or,
         ));
         self
@@ -435,7 +597,7 @@ impl QueryBuilder {
     pub fn and_is_null(mut self, field: &str) -> Self {
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "IS NULL".to_string(),
+            Operator::IsNull,
             ConditionType::And,
         ));
         self
@@ -445,7 +607,7 @@ impl QueryBuilder {
     pub fn and_is_not_null(mut self, field: &str) -> Self {
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "IS NOT NULL".to_string(),
+            Operator::IsNotNull,
             ConditionType::And,
         ));
         self
@@ -454,7 +616,7 @@ impl QueryBuilder {
     pub fn or_is_null(mut self, field: &str) -> Self {
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "IS NULL".to_string(),
+            Operator::IsNull,
             ConditionType::Or,
         ));
         self
@@ -463,7 +625,7 @@ impl QueryBuilder {
     pub fn or_is_not_null(mut self, field: &str) -> Self {
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            "IS NOT NULL".to_string(),
+            Operator::IsNotNull,
             ConditionType::Or,
         ));
         self
@@ -484,7 +646,7 @@ impl QueryBuilder {
         let end_index = self.binds.len();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            format!("BETWEEN({},{})", start_index, end_index),
+            Operator::Between(start_index, end_index),
             ConditionType::And,
         ));
         self
@@ -504,7 +666,7 @@ impl QueryBuilder {
         let end_index = self.binds.len();
         self.conditions.push(ConditionItem::Single(
             field.to_string(),
-            format!("BETWEEN({},{})", start_index, end_index),
+            Operator::Between(start_index, end_index),
             ConditionType::Or,
         ));
         self
@@ -594,81 +756,9 @@ impl QueryBuilder {
                     // 对列名进行转义，兼容 MySQL / Postgres / SQLite
                     let escaped_field = escape_identifier(driver, field);
 
-                    // 处理特殊操作符
-                    if op.starts_with("IN(") {
-                        let parts: Vec<&str> = op
-                            .strip_prefix("IN(")
-                            .unwrap()
-                            .strip_suffix(")")
-                            .unwrap()
-                            .split(',')
-                            .collect();
-                        if parts.len() == 2 {
-                            let start: usize = parts[0].parse().unwrap_or(0);
-                            let end: usize = parts[1].parse().unwrap_or(start);
-                            sql.push_str(&format!("{} IN (", escaped_field));
-                            let mut in_first = true;
-                            for _ in start..end {
-                                if !in_first {
-                                    sql.push_str(", ");
-                                }
-                                in_first = false;
-                                sql.push_str(&driver.placeholder(bind_index));
-                                bind_index += 1;
-                            }
-                            sql.push_str(")");
-                        }
-                    } else if op.starts_with("NOT_IN(") {
-                        let parts: Vec<&str> = op
-                            .strip_prefix("NOT_IN(")
-                            .unwrap()
-                            .strip_suffix(")")
-                            .unwrap()
-                            .split(',')
-                            .collect();
-                        if parts.len() == 2 {
-                            let start: usize = parts[0].parse().unwrap_or(0);
-                            let end: usize = parts[1].parse().unwrap_or(start);
-                            sql.push_str(&format!("{} NOT IN (", escaped_field));
-                            let mut in_first = true;
-                            for _ in start..end {
-                                if !in_first {
-                                    sql.push_str(", ");
-                                }
-                                in_first = false;
-                                sql.push_str(&driver.placeholder(bind_index));
-                                bind_index += 1;
-                            }
-                            sql.push_str(")");
-                        }
-                    } else if op.starts_with("BETWEEN(") {
-                        let parts: Vec<&str> = op
-                            .strip_prefix("BETWEEN(")
-                            .unwrap()
-                            .strip_suffix(")")
-                            .unwrap()
-                            .split(',')
-                            .collect();
-                        if parts.len() == 2 {
-                            sql.push_str(&format!(
-                                "{} BETWEEN {} AND {}",
-                                escaped_field,
-                                driver.placeholder(bind_index),
-                                driver.placeholder(bind_index + 1)
-                            ));
-                            bind_index += 2;
-                        }
-                    } else if op == "IS NULL" || op == "IS NOT NULL" {
-                        sql.push_str(&format!("{} {}", escaped_field, op));
-                    } else {
-                        sql.push_str(&format!(
-                            "{} {} {}",
-                            escaped_field,
-                            op,
-                            driver.placeholder(bind_index)
-                        ));
-                        bind_index += 1;
-                    }
+                    // 使用 Operator 枚举生成 SQL
+                    let op_sql = op.to_sql(driver, &mut bind_index);
+                    sql.push_str(&format!("{} {}", escaped_field, op_sql));
                 }
                 ConditionItem::Group(group_builder, _) => {
                     // 递归处理分组条件
@@ -1566,5 +1656,93 @@ mod tests {
             sql,
             "SELECT \"user\", COUNT(*) FROM orders GROUP BY \"user\""
         );
+    }
+
+    // ========== 正则表达式测试 ==========
+    #[test]
+    fn test_and_regexp_mysql() {
+        let builder =
+            QueryBuilder::new("SELECT * FROM users").and_regexp("email", "^[a-z]+@example\\.com$");
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(sql, "SELECT * FROM users WHERE `email` REGEXP ?");
+        assert_eq!(builder.binds().len(), 1);
+        assert_eq!(
+            builder.binds()[0],
+            BindValue::String("^[a-z]+@example\\.com$".to_string())
+        );
+    }
+
+    #[test]
+    fn test_and_regexp_postgres() {
+        let builder =
+            QueryBuilder::new("SELECT * FROM users").and_regexp("email", "^[a-z]+@example\\.com$");
+        let sql = builder.into_sql(postgres_driver());
+        assert_eq!(sql, "SELECT * FROM users WHERE \"email\" ~ $1");
+        assert_eq!(builder.binds().len(), 1);
+        assert_eq!(
+            builder.binds()[0],
+            BindValue::String("^[a-z]+@example\\.com$".to_string())
+        );
+    }
+
+    #[test]
+    fn test_and_regexp_sqlite() {
+        let builder =
+            QueryBuilder::new("SELECT * FROM users").and_regexp("email", "^[a-z]+@example\\.com$");
+        let sql = builder.into_sql(sqlite_driver());
+        // SQLite 不支持原生正则，但我们仍然生成 REGEXP（实际使用时可能会失败）
+        assert_eq!(sql, "SELECT * FROM users WHERE \"email\" REGEXP ?");
+        assert_eq!(builder.binds().len(), 1);
+    }
+
+    #[test]
+    fn test_or_regexp() {
+        let builder = QueryBuilder::new("SELECT * FROM users WHERE 1=1")
+            .and_eq("is_del", 0i64)
+            .or_regexp("username", "^admin");
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT * FROM users WHERE 1=1 AND `is_del` = ? OR `username` REGEXP ?"
+        );
+        assert_eq!(builder.binds().len(), 2);
+        assert_eq!(builder.binds()[0], BindValue::Int64(0));
+        assert_eq!(builder.binds()[1], BindValue::String("^admin".to_string()));
+    }
+
+    #[test]
+    fn test_regexp_with_other_conditions() {
+        let builder = QueryBuilder::new("SELECT * FROM users")
+            .and_eq("status", "active")
+            .and_regexp("email", "@example\\.com$")
+            .and_like("name", "test")
+            .order_by("id", true);
+        let sql = builder.into_sql(mysql_driver());
+        assert!(sql.contains("`status` = ?"));
+        assert!(sql.contains("`email` REGEXP ?"));
+        assert!(sql.contains("`name` LIKE ?"));
+        assert!(sql.contains("ORDER BY `id`"));
+        assert_eq!(builder.binds().len(), 3);
+    }
+
+    #[test]
+    fn test_regexp_postgres_case_sensitive() {
+        let builder =
+            QueryBuilder::new("SELECT * FROM users").and_regexp("email", "^[A-Z]+@example\\.com$");
+        let sql = builder.into_sql(postgres_driver());
+        // PostgreSQL 的 ~ 是大小写敏感的
+        assert_eq!(sql, "SELECT * FROM users WHERE \"email\" ~ $1");
+        assert_eq!(builder.binds().len(), 1);
+    }
+
+    #[test]
+    fn test_regexp_multiple_fields() {
+        let builder = QueryBuilder::new("SELECT * FROM users")
+            .and_regexp("email", "@example\\.com$")
+            .or_regexp("username", "^admin");
+        let sql = builder.into_sql(mysql_driver());
+        assert!(sql.contains("`email` REGEXP ?"));
+        assert!(sql.contains("OR `username` REGEXP ?"));
+        assert_eq!(builder.binds().len(), 2);
     }
 }
