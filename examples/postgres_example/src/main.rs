@@ -1,5 +1,4 @@
-use sqlx_plus_core::{Crud, DbPool, QueryBuilder};
-use sqlx_plus_derive::{ModelMeta, CRUD};
+use sqlxplus::{Crud, DbPool, ModelMeta, QueryBuilder, CRUD};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // 示例模型

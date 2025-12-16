@@ -126,7 +126,7 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
         // 如果指定了逻辑删除字段，生成包含 SOFT_DELETE_FIELD 的实现
         let soft_delete_lit = syn::LitStr::new(&soft_delete, proc_macro2::Span::call_site());
         quote! {
-            impl sqlx_plus_core::Model for #name {
+            impl sqlxplus::Model for #name {
                 const TABLE: &'static str = #table;
                 const PK: &'static str = #pk;
                 const SOFT_DELETE_FIELD: Option<&'static str> = Some(#soft_delete_lit);
@@ -135,7 +135,7 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
     } else {
         // 如果没有指定逻辑删除字段，SOFT_DELETE_FIELD 为 None
         quote! {
-            impl sqlx_plus_core::Model for #name {
+            impl sqlxplus::Model for #name {
                 const TABLE: &'static str = #table;
                 const PK: &'static str = #pk;
                 const SOFT_DELETE_FIELD: Option<&'static str> = None;
@@ -310,10 +310,10 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     // 生成实现代码
     let expanded = quote! {
         #[async_trait::async_trait]
-        impl sqlx_plus_core::Crud for #name {
-            async fn insert(&self, pool: &sqlx_plus_core::DbPool) -> sqlx_plus_core::db_pool::Result<sqlx_plus_core::crud::Id> {
-                use sqlx_plus_core::Model;
-                use sqlx_plus_core::utils::escape_identifier;
+        impl sqlxplus::Crud for #name {
+            async fn insert(&self, pool: &sqlxplus::DbPool) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id> {
+                use sqlxplus::Model;
+                use sqlxplus::utils::escape_identifier;
                 let table = Self::TABLE;
                 let driver = pool.driver();
                 let escaped_table = escape_identifier(driver, table);
@@ -321,19 +321,19 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let sql = pool.convert_sql(&sql);
 
                 match pool.driver() {
-                    sqlx_plus_core::db_pool::DbDriver::MySql => {
-                        let pool_ref = pool.mysql_pool().ok_or(sqlx_plus_core::db_pool::DbPoolError::NoPoolAvailable)?;
+                    sqlxplus::db_pool::DbDriver::MySql => {
+                        let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let result = sqlx::query(&sql)
                             #( .bind(&self.#insert_field_names) )*
                             .execute(pool_ref)
                             .await?;
                         Ok(result.last_insert_id() as i64)
                     }
-                    sqlx_plus_core::db_pool::DbDriver::Postgres => {
-                        let pool_ref = pool.pg_pool().ok_or(sqlx_plus_core::db_pool::DbPoolError::NoPoolAvailable)?;
+                    sqlxplus::db_pool::DbDriver::Postgres => {
+                        let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let pk = Self::PK;
-                        use sqlx_plus_core::utils::escape_identifier;
-                        let escaped_pk = escape_identifier(sqlx_plus_core::db_pool::DbDriver::Postgres, pk);
+                        use sqlxplus::utils::escape_identifier;
+                        let escaped_pk = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, pk);
                         // 为 PostgreSQL 添加 RETURNING 子句
                         let sql_with_returning = format!("{} RETURNING {}", sql, escaped_pk);
                         let id: i64 = sqlx::query_scalar(&sql_with_returning)
@@ -342,8 +342,8 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                             .await?;
                         Ok(id)
                     }
-                    sqlx_plus_core::db_pool::DbDriver::Sqlite => {
-                        let pool_ref = pool.sqlite_pool().ok_or(sqlx_plus_core::db_pool::DbPoolError::NoPoolAvailable)?;
+                    sqlxplus::db_pool::DbDriver::Sqlite => {
+                        let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let result = sqlx::query(&sql)
                             #( .bind(&self.#insert_field_names) )*
                             .execute(pool_ref)
@@ -353,9 +353,9 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 }
             }
 
-            async fn update(&self, pool: &sqlx_plus_core::DbPool) -> sqlx_plus_core::db_pool::Result<()> {
-                use sqlx_plus_core::Model;
-                use sqlx_plus_core::utils::escape_identifier;
+            async fn update(&self, pool: &sqlxplus::DbPool) -> sqlxplus::db_pool::Result<()> {
+                use sqlxplus::Model;
+                use sqlxplus::utils::escape_identifier;
                 let table = Self::TABLE;
                 let pk = Self::PK;
                 let driver = pool.driver();
@@ -365,24 +365,24 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let sql = pool.convert_sql(&sql);
 
                 match pool.driver() {
-                    sqlx_plus_core::db_pool::DbDriver::MySql => {
-                        let pool_ref = pool.mysql_pool().ok_or(sqlx_plus_core::db_pool::DbPoolError::NoPoolAvailable)?;
+                    sqlxplus::db_pool::DbDriver::MySql => {
+                        let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         sqlx::query(&sql)
                             #( .bind(&self.#update_field_names) )*
                             .bind(&self.#pk_ident)
                             .execute(pool_ref)
                             .await?;
                     }
-                    sqlx_plus_core::db_pool::DbDriver::Postgres => {
-                        let pool_ref = pool.pg_pool().ok_or(sqlx_plus_core::db_pool::DbPoolError::NoPoolAvailable)?;
+                    sqlxplus::db_pool::DbDriver::Postgres => {
+                        let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         sqlx::query(&sql)
                             #( .bind(&self.#update_field_names) )*
                             .bind(&self.#pk_ident)
                             .execute(pool_ref)
                             .await?;
                     }
-                    sqlx_plus_core::db_pool::DbDriver::Sqlite => {
-                        let pool_ref = pool.sqlite_pool().ok_or(sqlx_plus_core::db_pool::DbPoolError::NoPoolAvailable)?;
+                    sqlxplus::db_pool::DbDriver::Sqlite => {
+                        let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         sqlx::query(&sql)
                             #( .bind(&self.#update_field_names) )*
                             .bind(&self.#pk_ident)

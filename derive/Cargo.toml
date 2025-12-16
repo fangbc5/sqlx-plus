@@ -1,10 +1,10 @@
 [package]
-name = "sqlx-plus-derive"
+name = "sqlxplus-derive"
 version = "0.1.0"
 edition = "2021"
 authors = ["fangbc5@163.com"]
 license = "MIT OR Apache-2.0"
-description = "Proc-macro derives for sqlx-plus"
+description = "Proc-macro derives for sqlxplus"
 
 [lib]
 proc-macro = true

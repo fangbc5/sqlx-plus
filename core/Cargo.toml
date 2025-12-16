@@ -1,10 +1,13 @@
 [package]
-name = "sqlx-plus-core"
+name = "sqlxplus"
 version = "0.1.0"
 edition = "2021"
 authors = ["fangbc5@163.com"]
 license = "MIT OR Apache-2.0"
-description = "Core library for sqlx-plus"
+description = "A powerful SQL query builder and ORM for sqlx with CRUD operations"
+repository = "https://github.com/yourusername/sqlxplus"
+keywords = ["sqlx", "orm", "database", "query-builder", "crud"]
+categories = ["database", "web-programming"]
 
 [dependencies]
 sqlx = { workspace = true }
@@ -12,6 +15,8 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+# 引入 derive 包，以便重新导出宏
+sqlxplus-derive = { path = "../derive" }
 
 [features]
 default = ["mysql", "postgres", "sqlite"]

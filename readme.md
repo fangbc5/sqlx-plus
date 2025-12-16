@@ -1,4 +1,4 @@
-# sqlx-plus
+# sqlxplus
 
 > 在保持 SQLx 性能与 SQL 灵活性的前提下，为 Rust 项目提供一套可生产、跨 MySQL/Postgres/SQLite 的高级数据库封装（CRUD、分页、动态查询、代码生成）。
 
@@ -24,8 +24,8 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "m
 ### 使用示例
 
 ```rust
-use sqlx_plus::{DbPool, Model, Crud, QueryBuilder};
-use sqlx_plus_derive::{ModelMeta, CRUD};
+use sqlxplus::{DbPool, Model, Crud, QueryBuilder};
+use sqlxplus_derive::{ModelMeta, CRUD};
 
 #[derive(sqlx::FromRow, ModelMeta, CRUD)]
 #[model(table = "users", pk = "id")]

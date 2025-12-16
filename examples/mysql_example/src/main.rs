@@ -1,7 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sqlx_plus_core::{Crud, DbPool, QueryBuilder};
-use sqlx_plus_derive::{ModelMeta, CRUD};
+use sqlxplus::{Crud, DbPool, ModelMeta, QueryBuilder, CRUD};
 
 // 示例模型
 #[derive(Debug, sqlx::FromRow, ModelMeta, CRUD)]

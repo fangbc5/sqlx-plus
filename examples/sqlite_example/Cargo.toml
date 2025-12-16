@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-sqlx-plus-core = { path = "../../core", features = ["sqlite"] }
-sqlx-plus-derive = { path = "../../derive" }
+# 只依赖 sqlx-plus-core，它会自动传递 sqlx-plus-derive 并重新导出宏
+sqlxplus = { path = "../../core", features = ["sqlite"] }
 async-trait = { workspace = true }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "sqlite"] }
 tokio = { version = "1.40", features = ["full"] }
