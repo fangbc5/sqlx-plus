@@ -17,17 +17,16 @@
 
 ```toml
 [dependencies]
-sqlx-plus = { path = "../sqlx-plus" }
+sqlxplus = { version = "0.1.0", features = ["mysql"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "mysql"] }
 ```
 
 ### 使用示例
 
 ```rust
-use sqlxplus::{DbPool, Model, Crud, QueryBuilder};
-use sqlxplus_derive::{ModelMeta, CRUD};
+use sqlxplus::{DbPool, Crud, QueryBuilder, ModelMeta, CRUD};
 
-#[derive(sqlx::FromRow, ModelMeta, CRUD)]
+#[derive(Debug, sqlx::FromRow, ModelMeta, CRUD)]
 #[model(table = "users", pk = "id")]
 struct User {
     id: i64,
@@ -38,16 +37,16 @@ struct User {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let pool = DbPool::connect("mysql://user:pass@localhost/db").await?;
-    
+
     // 查找用户
     let user = User::find_by_id(&pool, 1).await?;
-    
+
     // 分页查询
     let builder = QueryBuilder::new("SELECT * FROM users WHERE 1=1")
         .and_eq("status", "active")
         .order_by("created_at", false);
     let page = User::paginate(&pool, builder, 1, 10).await?;
-    
+
     Ok(())
 }
 ```
@@ -56,15 +55,22 @@ async fn main() -> anyhow::Result<()> {
 
 ```
 sqlx-plus/
-├─ core/               # 核心库（sqlx_plus_core）
-├─ derive/             # proc-macro crate（ModelMeta, CRUD）
+├─ core/               # 核心库（sqlxplus）- 已发布到 crates.io
+├─ derive/             # proc-macro crate（sqlxplus-derive）- 已发布到 crates.io
 ├─ cli/                # 代码生成器
 └─ examples/           # 示例项目
 ```
 
-## 文档
+## 功能特性
 
-详细的设计文档请参考 [readme.md](./readme.md)。
+- ✅ CRUD 操作（Create, Read, Update, Delete）
+- ✅ 逻辑删除支持（soft delete）
+- ✅ 分页查询（paginate）
+- ✅ 安全查询构建器（QueryBuilder）
+- ✅ 条件分组（AND/OR with parentheses）
+- ✅ GROUP BY 和 HAVING 支持
+- ✅ LIMIT/OFFSET 支持
+- ✅ 多数据库支持（MySQL, PostgreSQL, SQLite）
 
 ## License
 
