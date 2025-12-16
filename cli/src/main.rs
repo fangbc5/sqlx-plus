@@ -8,8 +8,9 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "sqlx-plus-cli")]
-#[command(about = "Code generator for sqlx-plus", version)]
+#[command(name = "sqlxplus-cli")]
+#[command(about = "Code generator for sqlxplus")]
+#[command(version)]
 struct Args {
     /// Database URL (e.g., mysql://user:pass@localhost/db)
     #[arg(short, long)]
@@ -36,7 +37,7 @@ struct Args {
     dry_run: bool,
 
     /// Generate serde derives
-    #[arg(long)]
+    #[arg(long, default_value_t = true)]
     serde: bool,
 
     /// Generate CRUD derives
@@ -179,4 +180,3 @@ async fn main() -> Result<()> {
 fn to_snake_case(s: &str) -> String {
     s.to_lowercase()
 }
-
