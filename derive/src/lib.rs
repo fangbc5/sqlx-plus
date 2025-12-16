@@ -230,23 +230,27 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     };
 
     // 收集字段信息
-    // - field_names / field_columns: 所有字段（包括主键）
-    // - insert_field_*: 用于 INSERT（排除主键）
-    // - update_field_*: 用于 UPDATE SET 子句（排除主键）
-    let mut field_names = Vec::new();
-    let mut field_columns = Vec::new();
-    let mut skip_fields = Vec::new();
-    let mut insert_field_names = Vec::new();
-    let mut insert_field_columns = Vec::new();
-    let mut update_field_names = Vec::new();
-    // 主键字段的 Ident，用于绑定 WHERE pk = ?
+    // - pk_ident: 主键字段 Ident
+    // - insert_*/update_*: 非主键字段（INSERT / UPDATE 使用）
     let mut pk_ident_opt: Option<&syn::Ident> = None;
+
+    // INSERT 使用的字段（非主键）
+    let mut insert_normal_field_names: Vec<&syn::Ident> = Vec::new();
+    let mut insert_normal_field_columns: Vec<syn::LitStr> = Vec::new();
+    let mut insert_option_field_names: Vec<&syn::Ident> = Vec::new();
+    let mut insert_option_field_columns: Vec<syn::LitStr> = Vec::new();
+
+    // UPDATE 使用的字段（非主键）
+    let mut update_normal_field_names: Vec<&syn::Ident> = Vec::new();
+    let mut update_normal_field_columns: Vec<syn::LitStr> = Vec::new();
+    let mut update_option_field_names: Vec<&syn::Ident> = Vec::new();
+    let mut update_option_field_columns: Vec<syn::LitStr> = Vec::new();
 
     for field in fields {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
 
-        // 检查是否有 skip 属性
+        // 检查属性：skip / model
         let mut skip = false;
         for attr in &field.attrs {
             if attr.path().is_ident("skip") || attr.path().is_ident("model") {
@@ -256,56 +260,33 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
         }
 
         if !skip {
-            field_names.push(field_name);
-            field_columns.push(field_name_str.clone());
             if field_name_str == pk {
                 // 记录主键字段
                 pk_ident_opt = Some(field_name);
             } else {
                 // 非主键字段用于 INSERT / UPDATE
-                insert_field_names.push(field_name);
-                insert_field_columns.push(field_name_str.clone());
-                update_field_names.push(field_name);
+                let is_opt = is_option_type(&field.ty);
+                let col_lit = syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
+
+                if is_opt {
+                    insert_option_field_names.push(field_name);
+                    insert_option_field_columns.push(col_lit.clone());
+
+                    update_option_field_names.push(field_name);
+                    update_option_field_columns.push(col_lit);
+                } else {
+                    insert_normal_field_names.push(field_name);
+                    insert_normal_field_columns.push(col_lit.clone());
+
+                    update_normal_field_names.push(field_name);
+                    update_normal_field_columns.push(col_lit);
+                }
             }
-        } else {
-            skip_fields.push(field_name_str);
         }
     }
 
     // 编译期确保主键字段存在
     let pk_ident = pk_ident_opt.expect("Primary key field not found in struct");
-
-    // 生成 insert SQL（排除主键列，依赖数据库自增 / identity）
-    let insert_fields: Vec<String> = insert_field_columns.clone();
-    let insert_placeholders: Vec<String> =
-        (0..insert_fields.len()).map(|_| "?".to_string()).collect();
-    let insert_sql = format!(
-        "INSERT INTO {} ({}) VALUES ({})",
-        format!("{{TABLE}}"), // 占位符，运行时替换
-        insert_fields.join(", "),
-        insert_placeholders.join(", ")
-    );
-
-    // 生成 update SQL（排除主键列，只更新非主键列）
-    let update_fields: Vec<String> = field_columns
-        .iter()
-        .filter(|f| *f != &pk)
-        .cloned()
-        .collect();
-    let update_sql = if !update_fields.is_empty() {
-        format!(
-            "UPDATE {} SET {} WHERE {} = ?",
-            format!("{{TABLE}}"),
-            update_fields
-                .iter()
-                .map(|f| format!("{} = ?", f))
-                .collect::<Vec<_>>()
-                .join(", "),
-            format!("{{PK}}")
-        )
-    } else {
-        String::new()
-    };
 
     // 生成实现代码
     let expanded = quote! {
@@ -317,14 +298,50 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let table = Self::TABLE;
                 let driver = pool.driver();
                 let escaped_table = escape_identifier(driver, table);
-                let sql = #insert_sql.replace("{TABLE}", &escaped_table);
-                let sql = pool.convert_sql(&sql);
+
+                // 构建列名和占位符：
+                // - 非 Option 字段：始终参与 INSERT
+                // - Option 字段：仅在 Some 时参与 INSERT（None 则跳过，让数据库用默认值）
+                let mut columns: Vec<&str> = Vec::new();
+                let mut placeholders: Vec<&str> = Vec::new();
+
+                // 非 Option 字段：始终参与 INSERT
+                #(
+                    columns.push(#insert_normal_field_columns);
+                    placeholders.push("?");
+                )*
+
+                // Option 字段：仅当为 Some 时参与 INSERT
+                #(
+                    if self.#insert_option_field_names.is_some() {
+                        columns.push(#insert_option_field_columns);
+                        placeholders.push("?");
+                    }
+                )*
+
+                let raw_sql = format!(
+                    "INSERT INTO {} ({}) VALUES ({})",
+                    escaped_table,
+                    columns.join(", "),
+                    placeholders.join(", ")
+                );
+                let sql = pool.convert_sql(&raw_sql);
 
                 match pool.driver() {
                     sqlxplus::db_pool::DbDriver::MySql => {
                         let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
-                        let result = sqlx::query(&sql)
-                            #( .bind(&self.#insert_field_names) )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#insert_option_field_names.is_some() {
+                                query = query.bind(&self.#insert_option_field_names);
+                            }
+                        )*
+                        let result = query
                             .execute(pool_ref)
                             .await?;
                         Ok(result.last_insert_id() as i64)
@@ -336,16 +353,36 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         let escaped_pk = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, pk);
                         // 为 PostgreSQL 添加 RETURNING 子句
                         let sql_with_returning = format!("{} RETURNING {}", sql, escaped_pk);
-                        let id: i64 = sqlx::query_scalar(&sql_with_returning)
-                            #( .bind(&self.#insert_field_names) )*
+                        let mut query = sqlx::query_scalar::<_, i64>(&sql_with_returning);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#insert_option_field_names.is_some() {
+                                query = query.bind(&self.#insert_option_field_names);
+                            }
+                        )*
+                        let id: i64 = query
                             .fetch_one(pool_ref)
                             .await?;
                         Ok(id)
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
                         let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
-                        let result = sqlx::query(&sql)
-                            #( .bind(&self.#insert_field_names) )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#insert_option_field_names.is_some() {
+                                query = query.bind(&self.#insert_option_field_names);
+                            }
+                        )*
+                        let result = query
                             .execute(pool_ref)
                             .await?;
                         Ok(result.last_insert_rowid() as i64)
@@ -361,30 +398,208 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let driver = pool.driver();
                 let escaped_table = escape_identifier(driver, table);
                 let escaped_pk = escape_identifier(driver, pk);
-                let sql = #update_sql.replace("{TABLE}", &escaped_table).replace("{PK}", &escaped_pk);
-                let sql = pool.convert_sql(&sql);
+
+                // 构建 UPDATE SET 子句（Patch 语义）：
+                // - 非 Option 字段：始终参与更新
+                // - Option 字段：仅当为 Some 时参与更新
+                let mut set_parts: Vec<String> = Vec::new();
+
+                // 非 Option 字段
+                #(
+                    set_parts.push(format!("{} = ?", #update_normal_field_columns));
+                )*
+
+                // Option 字段
+                #(
+                    if self.#update_option_field_names.is_some() {
+                        set_parts.push(format!("{} = ?", #update_option_field_columns));
+                    }
+                )*
+
+                let raw_sql = if !set_parts.is_empty() {
+                    format!(
+                        "UPDATE {} SET {} WHERE {} = ?",
+                        escaped_table,
+                        set_parts.join(", "),
+                        escaped_pk,
+                    )
+                } else {
+                    // 没有需要更新的字段，直接返回 Ok(())
+                    return Ok(());
+                };
+
+                let sql = pool.convert_sql(&raw_sql);
 
                 match pool.driver() {
                     sqlxplus::db_pool::DbDriver::MySql => {
                         let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
-                        sqlx::query(&sql)
-                            #( .bind(&self.#update_field_names) )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query
                             .bind(&self.#pk_ident)
                             .execute(pool_ref)
                             .await?;
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
                         let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
-                        sqlx::query(&sql)
-                            #( .bind(&self.#update_field_names) )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query
                             .bind(&self.#pk_ident)
                             .execute(pool_ref)
                             .await?;
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
                         let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
-                        sqlx::query(&sql)
-                            #( .bind(&self.#update_field_names) )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query
+                            .bind(&self.#pk_ident)
+                            .execute(pool_ref)
+                            .await?;
+                    }
+                }
+                Ok(())
+            }
+
+            /// 更新记录（包含 Option 字段为 None 的重置）
+            ///
+            /// - 非 Option 字段：始终参与更新（col = ?）
+            /// - Option 字段：
+            ///   - Some(v)：col = ?
+            ///   - None：col = DEFAULT（由数据库决定置空或使用默认值）
+            async fn update_with_none(&self, pool: &sqlxplus::DbPool) -> sqlxplus::db_pool::Result<()> {
+                use sqlxplus::Model;
+                use sqlxplus::utils::escape_identifier;
+                let table = Self::TABLE;
+                let pk = Self::PK;
+                let driver = pool.driver();
+                let escaped_table = escape_identifier(driver, table);
+                let escaped_pk = escape_identifier(driver, pk);
+
+                // 构建 UPDATE SET 子句（Reset 语义）
+                let mut set_parts: Vec<String> = Vec::new();
+
+                // 非 Option 字段：始终更新为当前值
+                #(
+                    set_parts.push(format!("{} = ?", #update_normal_field_columns));
+                )*
+
+                // Option 字段：Some -> ?，None -> DEFAULT/NULL（根据驱动类型）
+                // SQLite 不支持 DEFAULT，且不可空字段不能设置为 NULL，所以跳过 None 字段的更新
+                match driver {
+                    sqlxplus::db_pool::DbDriver::Sqlite => {
+                        // SQLite: 仅更新 Some 值的字段，跳过 None 字段（因为 SQLite 不支持 DEFAULT）
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                set_parts.push(format!("{} = ?", #update_option_field_columns));
+                            }
+                            // None 字段跳过，不包含在 SET 子句中
+                        )*
+                    }
+                    _ => {
+                        // MySQL/PostgreSQL: None -> DEFAULT
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                set_parts.push(format!("{} = ?", #update_option_field_columns));
+                            } else {
+                                set_parts.push(format!("{} = DEFAULT", #update_option_field_columns));
+                            }
+                        )*
+                    }
+                }
+
+                if set_parts.is_empty() {
+                    return Ok(());
+                }
+
+                let raw_sql = format!(
+                    "UPDATE {} SET {} WHERE {} = ?",
+                    escaped_table,
+                    set_parts.join(", "),
+                    escaped_pk,
+                );
+
+                let sql = pool.convert_sql(&raw_sql);
+
+                match pool.driver() {
+                    sqlxplus::db_pool::DbDriver::MySql => {
+                        let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT）
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query
+                            .bind(&self.#pk_ident)
+                            .execute(pool_ref)
+                            .await?;
+                    }
+                    sqlxplus::db_pool::DbDriver::Postgres => {
+                        let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query
+                            .bind(&self.#pk_ident)
+                            .execute(pool_ref)
+                            .await?;
+                    }
+                    sqlxplus::db_pool::DbDriver::Sqlite => {
+                        let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query
                             .bind(&self.#pk_ident)
                             .execute(pool_ref)
                             .await?;
@@ -396,4 +611,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// 判断字段类型是否为 Option<T>
+fn is_option_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            if seg.ident == "Option" {
+                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                    return args.args.len() == 1;
+                }
+            }
+        }
+    }
+    false
 }

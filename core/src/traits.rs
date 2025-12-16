@@ -50,9 +50,28 @@ pub trait Crud:
         crate::crud::insert(self, pool).await
     }
 
-    /// 更新记录
+    /// 更新记录（Patch 语义）
+    ///
+    /// - 非 `Option` 字段：始终参与更新，生成 `SET col = ?` 并绑定当前值。
+    /// - `Option` 字段：
+    ///   - `Some(v)`：生成 `SET col = ?` 并绑定 `v`；
+    ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
+    ///
+    /// 默认实现委托给 `crate::crud::update`，具体 SQL 由 `derive(CRUD)` 宏生成。
     async fn update(&self, pool: &DbPool) -> Result<()> {
         crate::crud::update(self, pool).await
+    }
+
+    /// 更新记录（包含 None 字段的重置，Reset 语义）
+    ///
+    /// - 非 Option 字段：与 `update` 相同，始终参与更新
+    /// - Option 字段：
+    ///   - Some(v)：更新为 v
+    ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
+    ///
+    /// 默认实现委托给 `crate::crud::update_with_none`，实际 SQL 由 `derive(CRUD)` 宏生成。
+    async fn update_with_none(&self, pool: &DbPool) -> Result<()> {
+        crate::crud::update_with_none(self, pool).await
     }
 
     /// 根据 ID 删除记录

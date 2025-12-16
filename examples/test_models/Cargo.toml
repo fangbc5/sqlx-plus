@@ -1,0 +1,15 @@
+[package]
+name = "test_models"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqlxplus = { path = "../../core" }
+async-trait = { workspace = true }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "sqlite", "mysql", "postgres"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = "1.9"
+
+

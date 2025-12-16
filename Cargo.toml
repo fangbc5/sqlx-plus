@@ -6,6 +6,7 @@ members = [
     "examples/mysql_example",
     "examples/postgres_example",
     "examples/sqlite_example",
+    "examples/test_models",
 ]
 
 resolver = "2"

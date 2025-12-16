@@ -131,6 +131,21 @@ where
     ))
 }
 
+/// 更新记录（Reset 语义：Option 字段为 None 时重置为数据库默认值）
+///
+/// 实际 SQL 逻辑由 `derive(CRUD)` 宏生成。此处仅作为占位实现，
+/// 如果用户手动实现 `Crud` 而未提供对应实现，将在运行时报错提示。
+pub async fn update_with_none<M>(_model: &M, _pool: &DbPool) -> Result<()>
+where
+    M: Model,
+{
+    Err(crate::db_pool::DbPoolError::ConnectionError(
+        sqlx::Error::Configuration(
+            "update_with_none() must be implemented by derive(CRUD) macro".into(),
+        ),
+    ))
+}
+
 /// 根据 ID 物理删除记录
 pub async fn hard_delete_by_id<M>(
     pool: &DbPool,

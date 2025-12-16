@@ -1,16 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sqlxplus::{Crud, DbPool, ModelMeta, QueryBuilder, CRUD};
-
-// 示例模型
-#[derive(Debug, sqlx::FromRow, ModelMeta, CRUD)]
-#[model(table = "user", pk = "id", soft_delete = "is_del")]
-struct User {
-    id: i64,
-    username: String,
-    email: String,
-    is_del: i16, // 逻辑删除字段：0=未删除，1=已删除（MySQL tinyint，兼容 smallint）
-}
+use sqlxplus::{Crud, DbPool, QueryBuilder};
+use test_models::User;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -33,10 +24,11 @@ async fn main() -> anyhow::Result<()> {
     // ========== 1. INSERT (插入) ==========
     println!("=== 1. INSERT (插入新记录) ===");
     let new_user = User {
-        id: 0, // 数据库自动生成
-        username: format!("test_user_{}", timestamp),
-        email: format!("test_{}@example.com", timestamp),
-        is_del: 0,
+        id: None, // 数据库自动生成
+        username: Some(format!("test_user_{}", timestamp)),
+        email: Some(format!("test_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
     };
     let inserted_id = new_user.insert(&pool).await?;
     println!("插入成功，新记录 ID: {}\n", inserted_id);
@@ -47,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
     match &found_user {
         Some(user) => {
             println!(
-                "找到用户: ID={}, username={}, email={}, is_del={}",
+                "找到用户: ID={:?}, username={:?}, email={:?}, is_del={:?}",
                 user.id, user.username, user.email, user.is_del
             );
         }
@@ -58,14 +50,40 @@ async fn main() -> anyhow::Result<()> {
     println!();
 
     // ========== 3. UPDATE (更新) ==========
-    println!("=== 3. UPDATE (更新记录) ===");
+    println!("=== 3. UPDATE & UPDATE_WITH_NONE (更新记录) ===");
     if let Some(mut user) = found_user {
-        let old_email = user.email.clone();
-        user.email = format!("updated_{}@example.com", timestamp);
+        let id = user.id;
+
+        // 3.1 Patch 语义：update，不应覆盖为 None 的字段
+        println!("--- 3.1 使用 update（Patch）更新 email 和 system_type ---");
+        user.email = Some(format!("updated_{}@example.com", timestamp));
+        user.system_type = Some(2i16);
         user.update(&pool).await?;
-        println!("更新结果: 成功");
-        println!("  旧邮箱: {}", old_email);
-        println!("  新邮箱: {}\n", user.email);
+
+        let patched_user = User::find_by_id(&pool, id.unwrap_or_default()).await?;
+        if let Some(u) = patched_user {
+            println!(
+                "update 后: email={:?}, system_type={:?}",
+                u.email, u.system_type
+            );
+        }
+
+        // 3.2 Reset 语义：update_with_none，将 Option::None 重置为默认值
+        println!("--- 3.2 使用 update_with_none（Reset）将 system_type 置为默认 ---");
+        let mut user = User::find_by_id(&pool, id.unwrap_or_default())
+            .await?
+            .expect("user should exist");
+        user.system_type = None;
+        user.update_with_none(&pool).await?;
+
+        let reset_user = User::find_by_id(&pool, id.unwrap_or_default()).await?;
+        if let Some(u) = reset_user {
+            println!(
+                "update_with_none 后: email={:?}, system_type={:?}（应恢复为数据库默认值 1）",
+                u.email, u.system_type
+            );
+        }
+        println!();
     }
 
     // ========== 4. PAGINATE (分页查询) ==========
@@ -80,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  当前页: 1, 每页: 10");
     for (idx, user) in page_result.items.iter().enumerate() {
         println!(
-            "  [{}] ID: {}, username: {}, email: {}, is_del: {}",
+            "  [{}] ID: {:?}, username: {:?}, email: {:?}, is_del: {:?}",
             idx + 1,
             user.id,
             user.username,
@@ -93,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
     // ========== 5. SOFT_DELETE (逻辑删除) ==========
     println!("=== 5. SOFT_DELETE (逻辑删除) ===");
     if let Some(user) = User::find_by_id(&pool, inserted_id).await? {
-        println!("逻辑删除前: is_del = {}", user.is_del);
+        println!("逻辑删除前: is_del = {:?}", user.is_del);
         User::soft_delete_by_id(&pool, inserted_id).await?;
         println!("逻辑删除结果: 成功");
 
@@ -115,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
     let found_deleted = page_result
         .items
         .iter()
-        .any(|u| u.id == inserted_id && u.is_del == 0);
+        .any(|u| u.id == Some(inserted_id) && u.is_del == Some(0i16));
     if found_deleted {
         println!("  警告：分页查询返回了已逻辑删除的记录！");
     } else {
@@ -127,10 +145,11 @@ async fn main() -> anyhow::Result<()> {
     println!("=== 7. HARD_DELETE (物理删除) ===");
     // 先插入一条新记录用于物理删除测试
     let test_user = User {
-        id: 0,
-        username: format!("delete_test_{}", timestamp),
-        email: format!("delete_{}@example.com", timestamp),
-        is_del: 0,
+        id: None,
+        username: Some(format!("delete_test_{}", timestamp)),
+        email: Some(format!("delete_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
     };
     let test_id = test_user.insert(&pool).await?;
     println!("插入测试记录，ID: {}", test_id);
@@ -155,13 +174,13 @@ async fn main() -> anyhow::Result<()> {
     println!("find_all(None) 返回 {} 条记录", all_users.len());
     for (idx, user) in all_users.iter().take(10).enumerate() {
         println!(
-            "  [{}] ID: {}, username: {}, is_del: {}",
+            "  [{}] ID: {:?}, username: {:?}, is_del: {:?}",
             idx + 1,
             user.id,
             user.username,
             user.is_del
         );
-        if user.is_del == 1 {
+        if user.is_del == Some(1i16) {
             println!("    警告：不应该查询到已逻辑删除的记录！");
         }
     }
@@ -179,7 +198,7 @@ async fn main() -> anyhow::Result<()> {
     );
     for (idx, user) in all_users_with_builder.iter().take(10).enumerate() {
         println!(
-            "  [{}] ID: {}, username: {}, is_del: {}",
+            "  [{}] ID: {:?}, username: {:?}, is_del: {:?}",
             idx + 1,
             user.id,
             user.username,
