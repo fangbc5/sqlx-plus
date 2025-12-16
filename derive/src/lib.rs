@@ -626,3 +626,4 @@ fn is_option_type(ty: &syn::Type) -> bool {
     }
     false
 }
+

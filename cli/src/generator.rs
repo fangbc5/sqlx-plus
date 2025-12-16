@@ -266,3 +266,4 @@ fn to_pascal_case(s: &str) -> String {
 fn to_snake_case(s: &str) -> String {
     s.to_lowercase()
 }
+

@@ -28,3 +28,4 @@ pub async fn execute_insert(
     // 实际实现需要根据不同的数据库驱动进行适配
     todo!("This function should be implemented by the macro-generated code")
 }
+

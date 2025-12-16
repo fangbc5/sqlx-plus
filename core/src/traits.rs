@@ -147,3 +147,4 @@ pub trait Crud:
         crate::crud::find_all::<Self>(pool, builder).await
     }
 }
+
