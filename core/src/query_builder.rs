@@ -57,6 +57,10 @@ pub struct QueryBuilder {
     // 仅用于 into_sql 链式场景；在 into_paginated_sql 中会被显式忽略
     limit: Option<u64>,
     offset: Option<u64>,
+    // GROUP BY 和 HAVING 支持
+    group_by: Vec<String>,
+    having_conditions: Vec<ConditionItem>,
+    having_binds: Vec<BindValue>,
 }
 
 impl QueryBuilder {
@@ -68,6 +72,9 @@ impl QueryBuilder {
             binds: Vec::new(),
             limit: None,
             offset: None,
+            group_by: Vec::new(),
+            having_conditions: Vec::new(),
+            having_binds: Vec::new(),
         }
     }
 
@@ -86,6 +93,84 @@ impl QueryBuilder {
     /// 设置 OFFSET（链式调用），仅作用于 into_sql 生成的 SQL
     pub fn offset(mut self, n: u64) -> Self {
         self.offset = Some(n);
+        self
+    }
+
+    /// 添加 GROUP BY 字段（链式调用，可多次调用添加多个字段）
+    pub fn group_by(mut self, field: &str) -> Self {
+        self.group_by.push(field.to_string());
+        self
+    }
+
+    /// HAVING 条件：等于
+    pub fn having_eq(mut self, field: &str, value: impl Into<BindValue>) -> Self {
+        let bind_value = value.into();
+        self.having_conditions.push(ConditionItem::Single(
+            field.to_string(),
+            "=".to_string(),
+            ConditionType::And,
+        ));
+        self.having_binds.push(bind_value);
+        self
+    }
+
+    /// HAVING 条件：不等于
+    pub fn having_ne(mut self, field: &str, value: impl Into<BindValue>) -> Self {
+        let bind_value = value.into();
+        self.having_conditions.push(ConditionItem::Single(
+            field.to_string(),
+            "!=".to_string(),
+            ConditionType::And,
+        ));
+        self.having_binds.push(bind_value);
+        self
+    }
+
+    /// HAVING 条件：大于
+    pub fn having_gt(mut self, field: &str, value: impl Into<BindValue>) -> Self {
+        let bind_value = value.into();
+        self.having_conditions.push(ConditionItem::Single(
+            field.to_string(),
+            ">".to_string(),
+            ConditionType::And,
+        ));
+        self.having_binds.push(bind_value);
+        self
+    }
+
+    /// HAVING 条件：大于等于
+    pub fn having_ge(mut self, field: &str, value: impl Into<BindValue>) -> Self {
+        let bind_value = value.into();
+        self.having_conditions.push(ConditionItem::Single(
+            field.to_string(),
+            ">=".to_string(),
+            ConditionType::And,
+        ));
+        self.having_binds.push(bind_value);
+        self
+    }
+
+    /// HAVING 条件：小于
+    pub fn having_lt(mut self, field: &str, value: impl Into<BindValue>) -> Self {
+        let bind_value = value.into();
+        self.having_conditions.push(ConditionItem::Single(
+            field.to_string(),
+            "<".to_string(),
+            ConditionType::And,
+        ));
+        self.having_binds.push(bind_value);
+        self
+    }
+
+    /// HAVING 条件：小于等于
+    pub fn having_le(mut self, field: &str, value: impl Into<BindValue>) -> Self {
+        let bind_value = value.into();
+        self.having_conditions.push(ConditionItem::Single(
+            field.to_string(),
+            "<=".to_string(),
+            ConditionType::And,
+        ));
+        self.having_binds.push(bind_value);
         self
     }
 
@@ -600,6 +685,22 @@ impl QueryBuilder {
         (sql, bind_index)
     }
 
+    /// 生成 HAVING 条件部分的 SQL（不包含 base_sql、WHERE、GROUP BY 和 ORDER BY）
+    /// 返回 (sql, bind_count)
+    fn build_having_sql(&self, driver: DbDriver, start_bind_index: usize) -> (String, usize) {
+        if self.having_conditions.is_empty() {
+            return (String::new(), start_bind_index);
+        }
+
+        // 创建一个临时的 QueryBuilder 来复用 build_conditions_sql 的逻辑
+        // 但使用 having_conditions 和 having_binds
+        let mut temp_builder = QueryBuilder::new("");
+        temp_builder.conditions = self.having_conditions.clone();
+        temp_builder.binds = self.having_binds.clone();
+
+        temp_builder.build_conditions_sql(driver, start_bind_index)
+    }
+
     pub fn into_sql(&self, driver: DbDriver) -> String {
         let mut sql = self.base_sql.clone();
 
@@ -617,6 +718,27 @@ impl QueryBuilder {
 
             let (conditions_sql, _) = self.build_conditions_sql(driver, 0);
             sql.push_str(&conditions_sql);
+        }
+
+        // 添加 GROUP BY
+        if !self.group_by.is_empty() {
+            sql.push_str(" GROUP BY ");
+            for (i, field) in self.group_by.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                let escaped_field = escape_identifier(driver, field);
+                sql.push_str(&escaped_field);
+            }
+        }
+
+        // 添加 HAVING 条件
+        if !self.having_conditions.is_empty() {
+            sql.push_str(" HAVING ");
+            // 构建 HAVING 条件 SQL，需要从 WHERE 条件的绑定索引之后开始
+            let where_bind_count = self.binds.len();
+            let (having_sql, _) = self.build_having_sql(driver, where_bind_count);
+            sql.push_str(&having_sql);
         }
 
         // 添加 ORDER BY
@@ -679,8 +801,11 @@ impl QueryBuilder {
         sql
     }
 
-    pub fn binds(&self) -> &[BindValue] {
-        &self.binds
+    /// 返回所有绑定值（WHERE 条件 + HAVING 条件）
+    pub fn binds(&self) -> Vec<BindValue> {
+        let mut all_binds = self.binds.clone();
+        all_binds.extend_from_slice(&self.having_binds);
+        all_binds
     }
 }
 
@@ -1292,5 +1417,154 @@ mod tests {
     fn test_bind_value_from_bool() {
         let bv: BindValue = true.into();
         assert!(matches!(bv, BindValue::Bool(true)));
+    }
+
+    // ========== GROUP BY 和 HAVING 测试 ==========
+    #[test]
+    fn test_group_by_single_field() {
+        let builder =
+            QueryBuilder::new("SELECT category, COUNT(*) FROM products").group_by("category");
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY `category`"
+        );
+    }
+
+    #[test]
+    fn test_group_by_multiple_fields() {
+        let builder = QueryBuilder::new("SELECT category, status, COUNT(*) FROM products")
+            .group_by("category")
+            .group_by("status");
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, status, COUNT(*) FROM products GROUP BY `category`, `status`"
+        );
+    }
+
+    #[test]
+    fn test_group_by_with_postgres() {
+        let builder =
+            QueryBuilder::new("SELECT category, COUNT(*) FROM products").group_by("category");
+        let sql = builder.into_sql(postgres_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY \"category\""
+        );
+    }
+
+    #[test]
+    fn test_having_eq() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .group_by("category")
+            .having_eq("COUNT(*)", 10i64);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY `category` HAVING `COUNT(*)` = ?"
+        );
+        assert_eq!(builder.binds().len(), 1);
+        assert_eq!(builder.binds()[0], BindValue::Int64(10));
+    }
+
+    #[test]
+    fn test_having_gt() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .group_by("category")
+            .having_gt("COUNT(*)", 5i64);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY `category` HAVING `COUNT(*)` > ?"
+        );
+        assert_eq!(builder.binds().len(), 1);
+        assert_eq!(builder.binds()[0], BindValue::Int64(5));
+    }
+
+    #[test]
+    fn test_having_multiple_conditions() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .group_by("category")
+            .having_gt("COUNT(*)", 5i64)
+            .having_lt("COUNT(*)", 100i64);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY `category` HAVING `COUNT(*)` > ? AND `COUNT(*)` < ?"
+        );
+        assert_eq!(builder.binds().len(), 2);
+        assert_eq!(builder.binds()[0], BindValue::Int64(5));
+        assert_eq!(builder.binds()[1], BindValue::Int64(100));
+    }
+
+    #[test]
+    fn test_group_by_with_where_and_having() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .and_eq("status", "active")
+            .group_by("category")
+            .having_ge("COUNT(*)", 10i64);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products WHERE `status` = ? GROUP BY `category` HAVING `COUNT(*)` >= ?"
+        );
+        assert_eq!(builder.binds().len(), 2);
+        assert_eq!(builder.binds()[0], BindValue::String("active".to_string()));
+        assert_eq!(builder.binds()[1], BindValue::Int64(10));
+    }
+
+    #[test]
+    fn test_group_by_with_order_by() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .group_by("category")
+            .having_gt("COUNT(*)", 5)
+            .order_by("COUNT(*)", false);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY `category` HAVING `COUNT(*)` > ? ORDER BY `COUNT(*)` DESC"
+        );
+        assert_eq!(builder.binds().len(), 1);
+    }
+
+    #[test]
+    fn test_group_by_with_limit() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .group_by("category")
+            .having_gt("COUNT(*)", 5)
+            .limit(10);
+        let sql = builder.into_sql(mysql_driver());
+        assert_eq!(
+            sql,
+            "SELECT category, COUNT(*) FROM products GROUP BY `category` HAVING `COUNT(*)` > ? LIMIT 10"
+        );
+        assert_eq!(builder.binds().len(), 1);
+    }
+
+    #[test]
+    fn test_having_all_operators() {
+        let builder = QueryBuilder::new("SELECT category, COUNT(*) FROM products")
+            .group_by("category")
+            .having_eq("COUNT(*)", 10)
+            .having_ne("SUM(price)", 1000)
+            .having_gt("AVG(price)", 50)
+            .having_ge("MAX(price)", 200)
+            .having_lt("MIN(price)", 10)
+            .having_le("COUNT(*)", 100);
+        let sql = builder.into_sql(mysql_driver());
+        assert!(sql.contains("GROUP BY `category`"));
+        assert!(sql.contains("HAVING"));
+        assert_eq!(builder.binds().len(), 6);
+    }
+
+    #[test]
+    fn test_group_by_postgres_escaping() {
+        let builder = QueryBuilder::new("SELECT \"user\", COUNT(*) FROM orders").group_by("user");
+        let sql = builder.into_sql(postgres_driver());
+        assert_eq!(
+            sql,
+            "SELECT \"user\", COUNT(*) FROM orders GROUP BY \"user\""
+        );
     }
 }

@@ -66,21 +66,25 @@
 - 支持 `limit(n)` / `offset(n)` 链式方法（作用于 `into_sql`）
 - 支持多种数据库驱动（MySQL, PostgreSQL, SQLite），自动转换占位符格式
 
+### ✅ GROUP BY 和 HAVING
+
+- **GROUP BY**：支持单字段和多字段分组
+  - `group_by(field)` - 添加分组字段（可链式调用多次）
+- **HAVING**：支持分组后的条件过滤
+  - `having_eq(field, value)` - HAVING 等于
+  - `having_ne(field, value)` - HAVING 不等于
+  - `having_gt(field, value)` - HAVING 大于
+  - `having_ge(field, value)` - HAVING 大于等于
+  - `having_lt(field, value)` - HAVING 小于
+  - `having_le(field, value)` - HAVING 小于等于
+- 支持与 WHERE、ORDER BY、LIMIT/OFFSET 组合使用
+- 自动转义字段名，兼容 MySQL / PostgreSQL / SQLite
+
 ## 缺失的重要功能
 
 ### 🟡 中优先级（有用功能）
 
-1. **GROUP BY**
-
-   - 缺少分组查询
-   - 需要：`group_by(field)` 方法
-
-2. **HAVING**
-
-   - 缺少分组后条件过滤
-   - 需要：`having()` 方法
-
-3. **JOIN 支持**
+1. **JOIN 支持**
 
    - 缺少表连接
    - 需要：
@@ -89,17 +93,17 @@
      - `right_join(table, condition)`
      - `full_join(table, condition)`
 
-4. **子查询支持**
+2. **子查询支持**
 
    - 缺少子查询功能
    - 需要：支持在条件中使用子查询
 
-5. **EXISTS / NOT EXISTS**
+3. **EXISTS / NOT EXISTS**
 
    - 缺少存在性查询
    - 需要：`and_exists(subquery)`, `and_not_exists(subquery)`
 
-6. **正则表达式**
+4. **正则表达式**
    - 缺少正则匹配（MySQL REGEXP, PostgreSQL ~）
    - 需要：`and_regexp(field, pattern)`
 
@@ -154,10 +158,10 @@
 4. ✅ BETWEEN
 5. ✅ 更灵活的 LIKE（prefix, suffix, custom）
 
-### Phase 2: 常用功能（短期实现）
+### Phase 2: 常用功能（部分完成）
 
-6. GROUP BY
-7. HAVING
+6. ✅ GROUP BY
+7. ✅ HAVING
 8. EXISTS / NOT EXISTS
 
 ### Phase 3: 高级功能（长期规划）
@@ -172,8 +176,8 @@
 
 - **基本查询功能**: 95% ✅（已支持所有基本操作符和 OR 条件）
 - **条件组合**: 90% ✅（支持 AND/OR 和括号分组，大部分单表复杂条件可表达）
+- **聚合查询**: 60% ✅（支持 GROUP BY 和 HAVING，但缺少聚合函数支持）
 - **高级查询**: 30% ⚠️（缺少 JOIN、子查询）
-- **聚合查询**: 10% ❌（基本不支持）
 - **复杂查询**: 20% ❌（缺少 UNION、EXISTS 等）
 
-**总体评估**: 当前 QueryBuilder 能够覆盖 **80%+** 的常见查询场景，非常适合大多数 CRUD 操作和中等复杂度的查询。已实现的高优先级功能大大提升了实用性。
+**总体评估**: 当前 QueryBuilder 能够覆盖 **85%+** 的常见查询场景，非常适合大多数 CRUD 操作和中等复杂度的查询。已实现的高优先级功能（包括 GROUP BY 和 HAVING）大大提升了实用性。
