@@ -5,6 +5,9 @@ edition = "2021"
 authors = ["fangbc5@163.com"]
 license = "MIT OR Apache-2.0"
 description = "Proc-macro derives for sqlxplus"
+repository = "https://github.com/fangbc5/sqlx-plus"
+keywords = ["sqlx", "orm", "database", "proc-macro", "derive"]
+categories = ["database", "web-programming"]
 
 [lib]
 proc-macro = true
