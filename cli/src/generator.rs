@@ -27,7 +27,9 @@ impl TableInfo {
                 let sql_type_upper = col.sql_type.to_uppercase();
                 if sql_type_upper.contains("INT")
                     || sql_type_upper.contains("BOOL")
+                    || sql_type_upper.contains("BOOLEAN")
                     || sql_type_upper.contains("TINYINT")
+                    || sql_type_upper.contains("BIT")
                 {
                     return Some(&col.name);
                 }
@@ -143,7 +145,8 @@ impl CodeGenerator {
             } else {
                 sql_type_to_rust(col)
             };
-            code.push_str(&format!("    pub {}: {},\n", col.name, rust_type));
+            let field_name = escape_rust_keyword(&col.name);
+            code.push_str(&format!("    pub {}: {},\n", field_name, rust_type));
         }
 
         code.push_str("}\n");
@@ -267,3 +270,70 @@ fn to_snake_case(s: &str) -> String {
     s.to_lowercase()
 }
 
+/// 如果字段名是 Rust 关键字，使用原始标识符前缀避免编译错误
+fn escape_rust_keyword(name: &str) -> String {
+    if is_rust_keyword(name) {
+        format!("r#{}", name)
+    } else {
+        name.to_string()
+    }
+}
+
+/// 判断是否为 Rust 关键字
+fn is_rust_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "as"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "async"
+            | "await"
+            | "dyn"
+            // 未来/保留关键字
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "try"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+    )
+}
