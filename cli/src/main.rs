@@ -4,6 +4,7 @@ mod generator;
 use anyhow::{Context, Result};
 use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, MultiSelect};
+use generator::TableInfo;
 use std::fs;
 use std::path::PathBuf;
 
@@ -126,6 +127,8 @@ async fn main() -> Result<()> {
     // 生成代码
     let generator = generator::CodeGenerator::new(args.serde, args.derive_crud);
 
+    let mut generated_tables: Vec<TableInfo> = Vec::new();
+
     for table_name in &selected_tables {
         println!("\n🔍 Analyzing table: {}", table_name);
 
@@ -148,23 +151,48 @@ async fn main() -> Result<()> {
         if args.dry_run {
             println!("\n📄 Generated code for {}:\n", table_name);
             println!("{}", code);
+            generated_tables.push(table_info);
+            continue;
+        }
+
+        // 写入模型文件
+        let file_name = format!("{}.rs", to_snake_case(table_name));
+        let file_path = args.output.join(&file_name);
+
+        if file_path.exists() && !args.overwrite {
+            eprintln!(
+                "⚠️  File {:?} already exists, skipping (use --overwrite to overwrite)",
+                file_path
+            );
+            continue;
+        }
+
+        fs::write(&file_path, &code)
+            .with_context(|| format!("Failed to write file {:?}", file_path))?;
+
+        println!("✅ Generated: {:?}", file_path);
+
+        generated_tables.push(table_info);
+    }
+
+    // 生成 mod.rs 汇总模块
+    if !generated_tables.is_empty() {
+        let mod_code = generator.generate_mod_rs(&generated_tables)?;
+
+        if args.dry_run {
+            println!("\n📄 Generated mod.rs preview:\n{}", mod_code);
         } else {
-            // 写入文件
-            let file_name = format!("{}.rs", to_snake_case(table_name));
-            let file_path = args.output.join(&file_name);
-
-            if file_path.exists() && !args.overwrite {
+            let mod_path = args.output.join("mod.rs");
+            if mod_path.exists() && !args.overwrite {
                 eprintln!(
-                    "⚠️  File {:?} already exists, skipping (use --overwrite to overwrite)",
-                    file_path
+                    "⚠️  File {:?} already exists, skipping mod.rs (use --overwrite to overwrite)",
+                    mod_path
                 );
-                continue;
+            } else {
+                fs::write(&mod_path, &mod_code)
+                    .with_context(|| format!("Failed to write file {:?}", mod_path))?;
+                println!("✅ Generated: {:?}", mod_path);
             }
-
-            fs::write(&file_path, &code)
-                .with_context(|| format!("Failed to write file {:?}", file_path))?;
-
-            println!("✅ Generated: {:?}", file_path);
         }
     }
 
