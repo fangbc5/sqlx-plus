@@ -1,9 +1,9 @@
 [package]
 name = "sqlxplus-derive"
-version = "0.1.1"
-edition = "2021"
-authors = ["fangbc5@163.com"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Proc-macro derives for sqlxplus"
 repository = "https://github.com/fangbc5/sqlx-plus"
 keywords = ["sqlx", "orm", "database", "proc-macro", "derive"]

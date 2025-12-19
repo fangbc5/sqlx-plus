@@ -107,6 +107,106 @@ where
     }
 }
 
+/// 根据多个 ID 查找记录
+pub async fn find_by_ids<M, I>(pool: &DbPool, ids: I) -> Result<Vec<M>>
+where
+    M: Model
+        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
+        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
+        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
+        + Send
+        + Unpin,
+    I: IntoIterator + Send,
+    I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
+        + for<'q> sqlx::Encode<'q, sqlx::Postgres>
+        + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
+        + sqlx::Type<sqlx::MySql>
+        + sqlx::Type<sqlx::Postgres>
+        + sqlx::Type<sqlx::Sqlite>
+        + Send
+        + Sync
+        + Clone,
+{
+    // 将 IDs 收集到 Vec 中
+    let ids_vec: Vec<_> = ids.into_iter().collect();
+
+    // 如果 IDs 为空，直接返回空向量
+    if ids_vec.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 构建 SQL，如果指定了逻辑删除字段，自动过滤已删除的记录
+    use crate::utils::escape_identifier;
+    let driver = pool.driver();
+    let escaped_table = escape_identifier(driver, M::TABLE);
+    let escaped_pk = escape_identifier(driver, M::PK);
+
+    // 构建 IN 子句的占位符（使用 ? 占位符，convert_sql 会自动转换为对应数据库格式）
+    let placeholders_str = (0..ids_vec.len())
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut sql_str = format!(
+        "SELECT * FROM {} WHERE {} IN ({})",
+        escaped_table, escaped_pk, placeholders_str
+    );
+
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = escape_identifier(driver, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    let sql = pool.convert_sql(&sql_str);
+
+    match pool.driver() {
+        #[cfg(feature = "mysql")]
+        crate::db_pool::DbDriver::MySql => {
+            let pool_ref = pool
+                .mysql_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let mut query = sqlx::query_as::<sqlx::MySql, M>(&sql);
+            for id in &ids_vec {
+                query = query.bind(id.clone());
+            }
+            query
+                .fetch_all(pool_ref)
+                .await
+                .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+        }
+        #[cfg(feature = "postgres")]
+        crate::db_pool::DbDriver::Postgres => {
+            let pool_ref = pool
+                .pg_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let mut query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
+            for id in &ids_vec {
+                query = query.bind(id.clone());
+            }
+            query
+                .fetch_all(pool_ref)
+                .await
+                .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+        }
+        #[cfg(feature = "sqlite")]
+        crate::db_pool::DbDriver::Sqlite => {
+            let pool_ref = pool
+                .sqlite_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let mut query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
+            for id in &ids_vec {
+                query = query.bind(id.clone());
+            }
+            query
+                .fetch_all(pool_ref)
+                .await
+                .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+        }
+        #[allow(unreachable_patterns)]
+        _ => Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+    }
+}
+
 /// 插入记录（需要由 derive 宏生成具体的 SQL）
 pub async fn insert<M>(_model: &M, _pool: &DbPool) -> Result<Id>
 where
@@ -685,4 +785,3 @@ where
 
     Ok(Page::new(items, total, page, size))
 }
-

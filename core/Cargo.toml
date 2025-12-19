@@ -1,9 +1,9 @@
 [package]
 name = "sqlxplus"
-version = "0.1.1"
-edition = "2021"
-authors = ["fangbc5@163.com"]
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "A powerful SQL query builder and ORM for sqlx with CRUD operations"
 repository = "https://github.com/fangbc5/sqlx-plus"
 keywords = ["sqlx", "orm", "database", "query-builder", "crud"]
@@ -17,7 +17,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 # 引入 derive 包，以便重新导出宏
 # 本地开发时使用 path，发布到 crates.io 时使用版本号
-sqlxplus-derive = { version = "0.1.1", path = "../derive" }
+sqlxplus-derive = { version = "0.1.2", path = "../derive" }
 
 [features]
 default = ["mysql", "postgres", "sqlite"]

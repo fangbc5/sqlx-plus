@@ -45,6 +45,23 @@ pub trait Crud:
         crate::crud::find_by_id::<Self>(pool, id).await
     }
 
+    /// 根据多个 ID 查找记录
+    async fn find_by_ids<I>(pool: &DbPool, ids: I) -> Result<Vec<Self>>
+    where
+        I: IntoIterator + Send,
+        I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
+            + for<'q> sqlx::Encode<'q, sqlx::Postgres>
+            + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
+            + sqlx::Type<sqlx::MySql>
+            + sqlx::Type<sqlx::Postgres>
+            + sqlx::Type<sqlx::Sqlite>
+            + Send
+            + Sync
+            + Clone,
+    {
+        crate::crud::find_by_ids::<Self, I>(pool, ids).await
+    }
+
     /// 插入记录
     async fn insert(&self, pool: &DbPool) -> Result<Id> {
         crate::crud::insert(self, pool).await
@@ -147,4 +164,3 @@ pub trait Crud:
         crate::crud::find_all::<Self>(pool, builder).await
     }
 }
-
