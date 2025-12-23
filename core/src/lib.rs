@@ -1,5 +1,6 @@
 pub mod crud;
 pub mod db_pool;
+pub mod executor;
 pub mod macros_api;
 pub mod query_builder;
 pub mod traits;

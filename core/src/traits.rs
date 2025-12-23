@@ -1,6 +1,6 @@
 use crate::crud::{Id, Page};
-use crate::db_pool::DbPool;
 use crate::db_pool::Result;
+use crate::executor::DbExecutor;
 use crate::query_builder::QueryBuilder;
 
 /// Model trait 定义了模型的基本元数据
@@ -31,8 +31,8 @@ pub trait Crud:
     + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
 {
     /// 根据 ID 查找记录
-    async fn find_by_id(
-        pool: &DbPool,
+    async fn find_by_id<E>(
+        executor: &mut E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -41,12 +41,15 @@ pub trait Crud:
             + sqlx::Type<sqlx::Sqlite>
             + Send
             + Sync,
-    ) -> Result<Option<Self>> {
-        crate::crud::find_by_id::<Self>(pool, id).await
+    ) -> Result<Option<Self>>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::find_by_id::<Self, E>(executor, id).await
     }
 
     /// 根据多个 ID 查找记录
-    async fn find_by_ids<I>(pool: &DbPool, ids: I) -> Result<Vec<Self>>
+    async fn find_by_ids<I, E>(executor: &mut E, ids: I) -> Result<Vec<Self>>
     where
         I: IntoIterator + Send,
         I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
@@ -58,13 +61,17 @@ pub trait Crud:
             + Send
             + Sync
             + Clone,
+        E: DbExecutor + Send,
     {
-        crate::crud::find_by_ids::<Self, I>(pool, ids).await
+        crate::crud::find_by_ids::<Self, I, E>(executor, ids).await
     }
 
     /// 插入记录
-    async fn insert(&self, pool: &DbPool) -> Result<Id> {
-        crate::crud::insert(self, pool).await
+    async fn insert<E>(&self, executor: &mut E) -> Result<Id>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::insert::<Self, E>(self, executor).await
     }
 
     /// 更新记录（Patch 语义）
@@ -75,8 +82,11 @@ pub trait Crud:
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
     /// 默认实现委托给 `crate::crud::update`，具体 SQL 由 `derive(CRUD)` 宏生成。
-    async fn update(&self, pool: &DbPool) -> Result<()> {
-        crate::crud::update(self, pool).await
+    async fn update<E>(&self, executor: &mut E) -> Result<()>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::update::<Self, E>(self, executor).await
     }
 
     /// 更新记录（包含 None 字段的重置，Reset 语义）
@@ -87,14 +97,17 @@ pub trait Crud:
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
     /// 默认实现委托给 `crate::crud::update_with_none`，实际 SQL 由 `derive(CRUD)` 宏生成。
-    async fn update_with_none(&self, pool: &DbPool) -> Result<()> {
-        crate::crud::update_with_none(self, pool).await
+    async fn update_with_none<E>(&self, executor: &mut E) -> Result<()>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::update_with_none::<Self, E>(self, executor).await
     }
 
     /// 根据 ID 删除记录
     /// 如果指定了 SOFT_DELETE_FIELD，则进行逻辑删除；否则进行物理删除
-    async fn delete_by_id(
-        pool: &DbPool,
+    async fn delete_by_id<E>(
+        executor: &mut E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -103,17 +116,20 @@ pub trait Crud:
             + sqlx::Type<sqlx::Sqlite>
             + Send
             + Sync,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        E: DbExecutor + Send,
+    {
         if Self::SOFT_DELETE_FIELD.is_some() {
-            crate::crud::soft_delete_by_id::<Self>(pool, id).await
+            crate::crud::soft_delete_by_id::<Self, E>(executor, id).await
         } else {
-            crate::crud::hard_delete_by_id::<Self>(pool, id).await
+            crate::crud::hard_delete_by_id::<Self, E>(executor, id).await
         }
     }
 
     /// 根据 ID 进行逻辑删除（将逻辑删除字段设置为 1）
-    async fn soft_delete_by_id(
-        pool: &DbPool,
+    async fn soft_delete_by_id<E>(
+        executor: &mut E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -122,13 +138,16 @@ pub trait Crud:
             + sqlx::Type<sqlx::Sqlite>
             + Send
             + Sync,
-    ) -> Result<()> {
-        crate::crud::soft_delete_by_id::<Self>(pool, id).await
+    ) -> Result<()>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::soft_delete_by_id::<Self, E>(executor, id).await
     }
 
     /// 根据 ID 进行物理删除（真正删除记录）
-    async fn hard_delete_by_id(
-        pool: &DbPool,
+    async fn hard_delete_by_id<E>(
+        executor: &mut E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -137,31 +156,40 @@ pub trait Crud:
             + sqlx::Type<sqlx::Sqlite>
             + Send
             + Sync,
-    ) -> Result<()> {
-        crate::crud::hard_delete_by_id::<Self>(pool, id).await
+    ) -> Result<()>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::hard_delete_by_id::<Self, E>(executor, id).await
     }
 
     /// 分页查询
-    async fn paginate(
-        pool: &DbPool,
+    async fn paginate<E>(
+        executor: &mut E,
         builder: QueryBuilder,
         page: u64,
         size: u64,
-    ) -> Result<Page<Self>> {
-        crate::crud::paginate::<Self>(pool, builder, page, size).await
+    ) -> Result<Page<Self>>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::paginate::<Self, E>(executor, builder, page, size).await
     }
 
     /// 安全查询所有记录（限制最多 1000 条）
     /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
     ///
     /// # 参数
-    /// * `pool` - 数据库连接池
+    /// * `executor` - 数据库执行器（DbPool 或 Transaction）
     /// * `builder` - 可选的查询构建器，如果为 None，则查询所有记录
     ///
     /// # 返回
     /// 返回最多 1000 条记录的向量
-    async fn find_all(pool: &DbPool, builder: Option<QueryBuilder>) -> Result<Vec<Self>> {
-        crate::crud::find_all::<Self>(pool, builder).await
+    async fn find_all<E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::find_all::<Self, E>(executor, builder).await
     }
 
     /// 查询单条记录（使用 QueryBuilder）
@@ -169,25 +197,31 @@ pub trait Crud:
     /// 自动添加 LIMIT 1 限制
     ///
     /// # 参数
-    /// * `pool` - 数据库连接池
+    /// * `executor` - 数据库执行器（DbPool 或 Transaction）
     /// * `builder` - 查询构建器
     ///
     /// # 返回
     /// 返回单条记录，如果未找到则返回 None
-    async fn find_one(pool: &DbPool, builder: QueryBuilder) -> Result<Option<Self>> {
-        crate::crud::find_one::<Self>(pool, builder).await
+    async fn find_one<E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<Self>>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::find_one::<Self, E>(executor, builder).await
     }
 
     /// 统计记录数量（使用 QueryBuilder）
     /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
     ///
     /// # 参数
-    /// * `pool` - 数据库连接池
+    /// * `executor` - 数据库执行器（DbPool 或 Transaction）
     /// * `builder` - 查询构建器
     ///
     /// # 返回
     /// 返回符合条件的记录数量
-    async fn count(pool: &DbPool, builder: QueryBuilder) -> Result<u64> {
-        crate::crud::count::<Self>(pool, builder).await
+    async fn count<E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
+    where
+        E: DbExecutor + Send,
+    {
+        crate::crud::count::<Self, E>(executor, builder).await
     }
 }

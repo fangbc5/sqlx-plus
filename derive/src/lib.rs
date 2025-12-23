@@ -292,11 +292,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #[async_trait::async_trait]
         impl sqlxplus::Crud for #name {
-            async fn insert(&self, pool: &sqlxplus::DbPool) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id> {
+            async fn insert<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id>
+            where
+                E: sqlxplus::executor::DbExecutor + Send,
+            {
                 use sqlxplus::Model;
                 use sqlxplus::utils::escape_identifier;
                 let table = Self::TABLE;
-                let driver = pool.driver();
+                let driver = executor.driver();
                 let escaped_table = escape_identifier(driver, table);
 
                 // 构建列名和占位符：
@@ -325,11 +328,10 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     columns.join(", "),
                     placeholders.join(", ")
                 );
-                let sql = pool.convert_sql(&raw_sql);
+                let sql = executor.convert_sql(&raw_sql);
 
-                match pool.driver() {
+                match executor.driver() {
                     sqlxplus::db_pool::DbDriver::MySql => {
-                        let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -341,15 +343,22 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#insert_option_field_names);
                             }
                         )*
-                        let result = query
-                            .execute(pool_ref)
-                            .await?;
-                        Ok(result.last_insert_id() as i64)
+                        if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                            let result = query
+                                .execute(&mut **tx_ref)
+                                .await?;
+                            Ok(result.last_insert_id() as i64)
+                        } else if let Some(pool_ref) = executor.mysql_pool() {
+                            let result = query
+                                .execute(pool_ref)
+                                .await?;
+                            Ok(result.last_insert_id() as i64)
+                        } else {
+                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                        }
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
-                        let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let pk = Self::PK;
-                        use sqlxplus::utils::escape_identifier;
                         let escaped_pk = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, pk);
                         // 为 PostgreSQL 添加 RETURNING 子句
                         let sql_with_returning = format!("{} RETURNING {}", sql, escaped_pk);
@@ -364,13 +373,21 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#insert_option_field_names);
                             }
                         )*
-                        let id: i64 = query
-                            .fetch_one(pool_ref)
-                            .await?;
-                        Ok(id)
+                        if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                            let id: i64 = query
+                                .fetch_one(&mut **tx_ref)
+                                .await?;
+                            Ok(id)
+                        } else if let Some(pool_ref) = executor.pg_pool() {
+                            let id: i64 = query
+                                .fetch_one(pool_ref)
+                                .await?;
+                            Ok(id)
+                        } else {
+                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                        }
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
-                        let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -382,20 +399,32 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#insert_option_field_names);
                             }
                         )*
-                        let result = query
-                            .execute(pool_ref)
-                            .await?;
-                        Ok(result.last_insert_rowid() as i64)
+                        if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                            let result = query
+                                .execute(&mut **tx_ref)
+                                .await?;
+                            Ok(result.last_insert_rowid() as i64)
+                        } else if let Some(pool_ref) = executor.sqlite_pool() {
+                            let result = query
+                                .execute(pool_ref)
+                                .await?;
+                            Ok(result.last_insert_rowid() as i64)
+                        } else {
+                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                        }
                     }
                 }
             }
 
-            async fn update(&self, pool: &sqlxplus::DbPool) -> sqlxplus::db_pool::Result<()> {
+            async fn update<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<()>
+            where
+                E: sqlxplus::executor::DbExecutor + Send,
+            {
                 use sqlxplus::Model;
                 use sqlxplus::utils::escape_identifier;
                 let table = Self::TABLE;
                 let pk = Self::PK;
-                let driver = pool.driver();
+                let driver = executor.driver();
                 let escaped_table = escape_identifier(driver, table);
                 let escaped_pk = escape_identifier(driver, pk);
 
@@ -428,11 +457,10 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     return Ok(());
                 };
 
-                let sql = pool.convert_sql(&raw_sql);
+                let sql = executor.convert_sql(&raw_sql);
 
-                match pool.driver() {
+                match executor.driver() {
                     sqlxplus::db_pool::DbDriver::MySql => {
-                        let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -444,13 +472,16 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#update_option_field_names);
                             }
                         )*
-                        query
-                            .bind(&self.#pk_ident)
-                            .execute(pool_ref)
-                            .await?;
+                        query = query.bind(&self.#pk_ident);
+                        if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                            query.execute(&mut **tx_ref).await?;
+                        } else if let Some(pool_ref) = executor.mysql_pool() {
+                            query.execute(pool_ref).await?;
+                        } else {
+                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                        }
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
-                        let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -462,13 +493,16 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#update_option_field_names);
                             }
                         )*
-                        query
-                            .bind(&self.#pk_ident)
-                            .execute(pool_ref)
-                            .await?;
+                        query = query.bind(&self.#pk_ident);
+                        if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                            query.execute(&mut **tx_ref).await?;
+                        } else if let Some(pool_ref) = executor.pg_pool() {
+                            query.execute(pool_ref).await?;
+                        } else {
+                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                        }
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
-                        let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -480,10 +514,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#update_option_field_names);
                             }
                         )*
-                        query
-                            .bind(&self.#pk_ident)
-                            .execute(pool_ref)
-                            .await?;
+                        query = query.bind(&self.#pk_ident);
+                        if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                            query.execute(&mut **tx_ref).await?;
+                        } else if let Some(pool_ref) = executor.sqlite_pool() {
+                            query.execute(pool_ref).await?;
+                        } else {
+                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                        }
                     }
                 }
                 Ok(())
@@ -495,12 +533,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             /// - Option 字段：
             ///   - Some(v)：col = ?
             ///   - None：col = DEFAULT（由数据库决定置空或使用默认值）
-            async fn update_with_none(&self, pool: &sqlxplus::DbPool) -> sqlxplus::db_pool::Result<()> {
+            async fn update_with_none<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<()>
+            where
+                E: sqlxplus::executor::DbExecutor + Send,
+            {
                 use sqlxplus::Model;
                 use sqlxplus::utils::escape_identifier;
                 let table = Self::TABLE;
                 let pk = Self::PK;
-                let driver = pool.driver();
+                let driver = executor.driver();
                 let escaped_table = escape_identifier(driver, table);
                 let escaped_pk = escape_identifier(driver, pk);
 
@@ -547,11 +588,10 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     escaped_pk,
                 );
 
-                let sql = pool.convert_sql(&raw_sql);
+                let sql = executor.convert_sql(&raw_sql);
 
-                match pool.driver() {
+                match executor.driver() {
                     sqlxplus::db_pool::DbDriver::MySql => {
-                        let pool_ref = pool.mysql_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -563,13 +603,16 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#update_option_field_names);
                             }
                         )*
-                        query
-                            .bind(&self.#pk_ident)
-                            .execute(pool_ref)
-                            .await?;
+                        query = query.bind(&self.#pk_ident);
+                        if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                            query.execute(&mut **tx_ref).await?;
+                        } else if let Some(pool_ref) = executor.mysql_pool() {
+                            query.execute(pool_ref).await?;
+                        } else {
+                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                        }
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
-                        let pool_ref = pool.pg_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -581,13 +624,16 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#update_option_field_names);
                             }
                         )*
-                        query
-                            .bind(&self.#pk_ident)
-                            .execute(pool_ref)
-                            .await?;
+                        query = query.bind(&self.#pk_ident);
+                        if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                            query.execute(&mut **tx_ref).await?;
+                        } else if let Some(pool_ref) = executor.pg_pool() {
+                            query.execute(pool_ref).await?;
+                        } else {
+                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                        }
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
-                        let pool_ref = pool.sqlite_pool().ok_or(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)?;
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -599,10 +645,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 query = query.bind(&self.#update_option_field_names);
                             }
                         )*
-                        query
-                            .bind(&self.#pk_ident)
-                            .execute(pool_ref)
-                            .await?;
+                        query = query.bind(&self.#pk_ident);
+                        if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                            query.execute(&mut **tx_ref).await?;
+                        } else if let Some(pool_ref) = executor.sqlite_pool() {
+                            query.execute(pool_ref).await?;
+                        } else {
+                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                        }
                     }
                 }
                 Ok(())
@@ -626,4 +676,3 @@ fn is_option_type(ty: &syn::Type) -> bool {
     }
     false
 }
-

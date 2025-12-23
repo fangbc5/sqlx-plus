@@ -95,7 +95,4 @@ pub struct User {
     /// readonly (tinyint) | 可空
     /// 默认值: 0
     pub readonly: Option<i16>,
-    /// tenant_id (bigint) | 非空
-    /// 默认值: 0
-    pub tenant_id: Option<i64>,
 }
