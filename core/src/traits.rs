@@ -163,4 +163,31 @@ pub trait Crud:
     async fn find_all(pool: &DbPool, builder: Option<QueryBuilder>) -> Result<Vec<Self>> {
         crate::crud::find_all::<Self>(pool, builder).await
     }
+
+    /// 查询单条记录（使用 QueryBuilder）
+    /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
+    /// 自动添加 LIMIT 1 限制
+    ///
+    /// # 参数
+    /// * `pool` - 数据库连接池
+    /// * `builder` - 查询构建器
+    ///
+    /// # 返回
+    /// 返回单条记录，如果未找到则返回 None
+    async fn find_one(pool: &DbPool, builder: QueryBuilder) -> Result<Option<Self>> {
+        crate::crud::find_one::<Self>(pool, builder).await
+    }
+
+    /// 统计记录数量（使用 QueryBuilder）
+    /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
+    ///
+    /// # 参数
+    /// * `pool` - 数据库连接池
+    /// * `builder` - 查询构建器
+    ///
+    /// # 返回
+    /// 返回符合条件的记录数量
+    async fn count(pool: &DbPool, builder: QueryBuilder) -> Result<u64> {
+        crate::crud::count::<Self>(pool, builder).await
+    }
 }

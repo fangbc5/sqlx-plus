@@ -1,10 +1,241 @@
 use crate::db_pool::{DbPool, Result};
-use crate::query_builder::QueryBuilder;
+use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
 use sqlx::Row;
 
 /// 主键 ID 类型
 pub type Id = i64;
+
+/// 辅助函数：将绑定值应用到查询中（用于 query_as）
+#[cfg(feature = "mysql")]
+fn apply_binds_to_query_as_mysql<'q, M>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::MySql, M, sqlx::mysql::MySqlArguments>,
+    binds: &'q [BindValue],
+) -> sqlx::query::QueryAs<'q, sqlx::MySql, M, sqlx::mysql::MySqlArguments>
+where
+    M: for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>,
+{
+    for bind in binds {
+        match bind {
+            BindValue::String(s) => {
+                query = query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                query = query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                query = query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                query = query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                query = query.bind(b);
+            }
+            BindValue::Null => {
+                query = query.bind(Option::<String>::None);
+            }
+        }
+    }
+    query
+}
+
+/// 辅助函数：将绑定值应用到查询中（用于 query_as）
+#[cfg(feature = "postgres")]
+fn apply_binds_to_query_as_postgres<'q, M>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::Postgres, M, sqlx::postgres::PgArguments>,
+    binds: &'q [BindValue],
+) -> sqlx::query::QueryAs<'q, sqlx::Postgres, M, sqlx::postgres::PgArguments>
+where
+    M: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+{
+    for bind in binds {
+        match bind {
+            BindValue::String(s) => {
+                query = query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                query = query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                query = query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                query = query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                query = query.bind(b);
+            }
+            BindValue::Null => {
+                query = query.bind(Option::<String>::None);
+            }
+        }
+    }
+    query
+}
+
+/// 辅助函数：将绑定值应用到查询中（用于 query_as）
+#[cfg(feature = "sqlite")]
+fn apply_binds_to_query_as_sqlite<'q, M>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::Sqlite, M, sqlx::sqlite::SqliteArguments<'q>>,
+    binds: &'q [BindValue],
+) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, M, sqlx::sqlite::SqliteArguments<'q>>
+where
+    M: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>,
+{
+    for bind in binds {
+        match bind {
+            BindValue::String(s) => {
+                query = query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                query = query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                query = query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                query = query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                query = query.bind(b);
+            }
+            BindValue::Null => {
+                query = query.bind(Option::<String>::None);
+            }
+        }
+    }
+    query
+}
+
+/// 辅助函数：将绑定值应用到查询中（用于 query，不返回特定类型）
+#[cfg(feature = "mysql")]
+fn apply_binds_to_query_mysql<'q>(
+    mut query: sqlx::query::Query<'q, sqlx::MySql, sqlx::mysql::MySqlArguments>,
+    binds: &'q [BindValue],
+) -> sqlx::query::Query<'q, sqlx::MySql, sqlx::mysql::MySqlArguments> {
+    for bind in binds {
+        match bind {
+            BindValue::String(s) => {
+                query = query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                query = query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                query = query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                query = query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                query = query.bind(b);
+            }
+            BindValue::Null => {
+                query = query.bind(Option::<String>::None);
+            }
+        }
+    }
+    query
+}
+
+/// 辅助函数：将绑定值应用到查询中（用于 query，不返回特定类型）
+#[cfg(feature = "postgres")]
+fn apply_binds_to_query_postgres<'q>(
+    mut query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    binds: &'q [BindValue],
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    for bind in binds {
+        match bind {
+            BindValue::String(s) => {
+                query = query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                query = query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                query = query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                query = query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                query = query.bind(b);
+            }
+            BindValue::Null => {
+                query = query.bind(Option::<String>::None);
+            }
+        }
+    }
+    query
+}
+
+/// 辅助函数：将绑定值应用到查询中（用于 query，不返回特定类型）
+#[cfg(feature = "sqlite")]
+fn apply_binds_to_query_sqlite<'q>(
+    mut query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    binds: &'q [BindValue],
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+    for bind in binds {
+        match bind {
+            BindValue::String(s) => {
+                query = query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                query = query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                query = query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                query = query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                query = query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                query = query.bind(b);
+            }
+            BindValue::Null => {
+                query = query.bind(Option::<String>::None);
+            }
+        }
+    }
+    query
+}
 
 /// 分页结果
 #[derive(Debug, Clone)]
@@ -400,35 +631,8 @@ where
             let pool_ref = pool
                 .mysql_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query_as::<sqlx::MySql, M>(&sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query_as::<sqlx::MySql, M>(&sql);
+            let query = apply_binds_to_query_as_mysql(query, &binds);
             query.fetch_all(pool_ref).await?
         }
         #[cfg(feature = "postgres")]
@@ -436,35 +640,8 @@ where
             let pool_ref = pool
                 .pg_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
+            let query = apply_binds_to_query_as_postgres(query, &binds);
             query.fetch_all(pool_ref).await?
         }
         #[cfg(feature = "sqlite")]
@@ -472,35 +649,8 @@ where
             let pool_ref = pool
                 .sqlite_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
+            let query = apply_binds_to_query_as_sqlite(query, &binds);
             query.fetch_all(pool_ref).await?
         }
         #[allow(unreachable_patterns)]
@@ -513,6 +663,78 @@ where
     };
 
     Ok(items)
+}
+
+/// 查询单条记录（使用 QueryBuilder）
+/// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
+/// 自动添加 LIMIT 1 限制
+pub async fn find_one<M>(pool: &DbPool, builder: QueryBuilder) -> Result<Option<M>>
+where
+    M: Model
+        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
+        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
+        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
+        + Send
+        + Unpin,
+{
+    let driver = pool.driver();
+
+    // 构建查询构建器
+    use crate::utils::escape_identifier;
+    let escaped_table = escape_identifier(driver, M::TABLE);
+    let mut query_builder = builder;
+    // 无论外部传入的 builder 使用了什么 base_sql，这里统一成基于模型表名的 SQL
+    query_builder = query_builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+    // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        query_builder = query_builder.and_eq(soft_delete_field, 0);
+    }
+
+    // 自动添加 LIMIT 1
+    let mut sql = query_builder.into_sql(driver);
+    sql.push_str(" LIMIT 1");
+
+    let binds = query_builder.binds().to_vec();
+
+    let result: Option<M> = match driver {
+        #[cfg(feature = "mysql")]
+        crate::db_pool::DbDriver::MySql => {
+            let pool_ref = pool
+                .mysql_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let query = sqlx::query_as::<sqlx::MySql, M>(&sql);
+            let query = apply_binds_to_query_as_mysql(query, &binds);
+            query.fetch_optional(pool_ref).await?
+        }
+        #[cfg(feature = "postgres")]
+        crate::db_pool::DbDriver::Postgres => {
+            let pool_ref = pool
+                .pg_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
+            let query = apply_binds_to_query_as_postgres(query, &binds);
+            query.fetch_optional(pool_ref).await?
+        }
+        #[cfg(feature = "sqlite")]
+        crate::db_pool::DbDriver::Sqlite => {
+            let pool_ref = pool
+                .sqlite_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
+            let query = apply_binds_to_query_as_sqlite(query, &binds);
+            query.fetch_optional(pool_ref).await?
+        }
+        #[allow(unreachable_patterns)]
+        _ => {
+            return Err(crate::db_pool::DbPoolError::UnsupportedDatabase(format!(
+                "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
+                driver
+            )))
+        }
+    };
+
+    Ok(result)
 }
 
 /// 分页查询
@@ -553,35 +775,8 @@ where
             let pool_ref = pool
                 .mysql_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query(&count_sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query(&count_sql);
+            let query = apply_binds_to_query_mysql(query, &binds);
             let row = query.fetch_one(pool_ref).await?;
             row.get::<i64, _>(0) as u64
         }
@@ -590,35 +785,8 @@ where
             let pool_ref = pool
                 .pg_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query(&count_sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query(&count_sql);
+            let query = apply_binds_to_query_postgres(query, &binds);
             let row = query.fetch_one(pool_ref).await?;
             row.get::<i64, _>(0) as u64
         }
@@ -627,35 +795,8 @@ where
             let pool_ref = pool
                 .sqlite_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query(&count_sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query(&count_sql);
+            let query = apply_binds_to_query_sqlite(query, &binds);
             let row = query.fetch_one(pool_ref).await?;
             row.get::<i64, _>(0) as u64
         }
@@ -671,35 +812,8 @@ where
             let pool_ref = pool
                 .mysql_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query_as::<sqlx::MySql, M>(&data_sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query_as::<sqlx::MySql, M>(&data_sql);
+            let query = apply_binds_to_query_as_mysql(query, &binds);
             query.fetch_all(pool_ref).await?
         }
         #[cfg(feature = "postgres")]
@@ -707,35 +821,8 @@ where
             let pool_ref = pool
                 .pg_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query_as::<sqlx::Postgres, M>(&data_sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query_as::<sqlx::Postgres, M>(&data_sql);
+            let query = apply_binds_to_query_as_postgres(query, &binds);
             query.fetch_all(pool_ref).await?
         }
         #[cfg(feature = "sqlite")]
@@ -743,35 +830,8 @@ where
             let pool_ref = pool
                 .sqlite_pool()
                 .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
-            let mut query = sqlx::query_as::<sqlx::Sqlite, M>(&data_sql);
-            for bind in &binds {
-                match bind {
-                    crate::query_builder::BindValue::String(s) => {
-                        query = query.bind(s);
-                    }
-                    crate::query_builder::BindValue::Int64(i) => {
-                        query = query.bind(i);
-                    }
-                    crate::query_builder::BindValue::Int32(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Int16(i) => {
-                        query = query.bind(*i);
-                    }
-                    crate::query_builder::BindValue::Float64(f) => {
-                        query = query.bind(f);
-                    }
-                    crate::query_builder::BindValue::Float32(f) => {
-                        query = query.bind(*f);
-                    }
-                    crate::query_builder::BindValue::Bool(b) => {
-                        query = query.bind(b);
-                    }
-                    crate::query_builder::BindValue::Null => {
-                        query = query.bind(Option::<String>::None);
-                    }
-                }
-            }
+            let query = sqlx::query_as::<sqlx::Sqlite, M>(&data_sql);
+            let query = apply_binds_to_query_as_sqlite(query, &binds);
             query.fetch_all(pool_ref).await?
         }
         #[allow(unreachable_patterns)]
@@ -784,4 +844,65 @@ where
     };
 
     Ok(Page::new(items, total, page, size))
+}
+
+/// 统计记录数量（使用 QueryBuilder）
+/// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
+pub async fn count<M>(pool: &DbPool, builder: QueryBuilder) -> Result<u64>
+where
+    M: Model,
+{
+    let driver = pool.driver();
+
+    // 统一基础 SQL：始终从模型的表名出发
+    use crate::utils::escape_identifier;
+    let escaped_table = escape_identifier(driver, M::TABLE);
+    let mut builder = builder;
+    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+    // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        builder = builder.and_eq(soft_delete_field, 0);
+    }
+
+    let binds = builder.binds().to_vec();
+
+    // 获取总数
+    let count_sql = builder.into_count_sql(driver);
+    let total = match driver {
+        #[cfg(feature = "mysql")]
+        crate::db_pool::DbDriver::MySql => {
+            let pool_ref = pool
+                .mysql_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let query = sqlx::query(&count_sql);
+            let query = apply_binds_to_query_mysql(query, &binds);
+            let row = query.fetch_one(pool_ref).await?;
+            row.get::<i64, _>(0) as u64
+        }
+        #[cfg(feature = "postgres")]
+        crate::db_pool::DbDriver::Postgres => {
+            let pool_ref = pool
+                .pg_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let query = sqlx::query(&count_sql);
+            let query = apply_binds_to_query_postgres(query, &binds);
+            let row = query.fetch_one(pool_ref).await?;
+            row.get::<i64, _>(0) as u64
+        }
+        #[cfg(feature = "sqlite")]
+        crate::db_pool::DbDriver::Sqlite => {
+            let pool_ref = pool
+                .sqlite_pool()
+                .ok_or(crate::db_pool::DbPoolError::NoPoolAvailable)?;
+            let query = sqlx::query(&count_sql);
+            let query = apply_binds_to_query_sqlite(query, &binds);
+            let row = query.fetch_one(pool_ref).await?;
+            row.get::<i64, _>(0) as u64
+        }
+        #[allow(unreachable_patterns)]
+        _ => return Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+    };
+
+    Ok(total)
 }
