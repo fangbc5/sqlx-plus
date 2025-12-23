@@ -4,7 +4,9 @@ use crate::db_pool::DbDriver;
 /// 类似于 sqlx 的 Executor trait，允许 CRUD 方法同时支持连接池和事务
 ///
 /// 这个 trait 提供了与 DbPool 相同的方法签名，让 CRUD 方法可以统一使用
-pub trait DbExecutor {
+///
+/// 注意：此 trait 要求 `Send`，因为异步方法需要在不同线程之间传递 Future
+pub trait DbExecutor: Send {
     /// 获取驱动类型
     fn driver(&self) -> DbDriver;
 

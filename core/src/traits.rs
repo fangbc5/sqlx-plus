@@ -43,7 +43,7 @@ pub trait Crud:
             + Sync,
     ) -> Result<Option<Self>>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::find_by_id::<Self, E>(executor, id).await
     }
@@ -61,7 +61,7 @@ pub trait Crud:
             + Send
             + Sync
             + Clone,
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::find_by_ids::<Self, I, E>(executor, ids).await
     }
@@ -69,7 +69,7 @@ pub trait Crud:
     /// 插入记录
     async fn insert<E>(&self, executor: &mut E) -> Result<Id>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::insert::<Self, E>(self, executor).await
     }
@@ -84,7 +84,7 @@ pub trait Crud:
     /// 默认实现委托给 `crate::crud::update`，具体 SQL 由 `derive(CRUD)` 宏生成。
     async fn update<E>(&self, executor: &mut E) -> Result<()>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::update::<Self, E>(self, executor).await
     }
@@ -99,7 +99,7 @@ pub trait Crud:
     /// 默认实现委托给 `crate::crud::update_with_none`，实际 SQL 由 `derive(CRUD)` 宏生成。
     async fn update_with_none<E>(&self, executor: &mut E) -> Result<()>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::update_with_none::<Self, E>(self, executor).await
     }
@@ -118,7 +118,7 @@ pub trait Crud:
             + Sync,
     ) -> Result<()>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         if Self::SOFT_DELETE_FIELD.is_some() {
             crate::crud::soft_delete_by_id::<Self, E>(executor, id).await
@@ -140,7 +140,7 @@ pub trait Crud:
             + Sync,
     ) -> Result<()>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::soft_delete_by_id::<Self, E>(executor, id).await
     }
@@ -158,7 +158,7 @@ pub trait Crud:
             + Sync,
     ) -> Result<()>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::hard_delete_by_id::<Self, E>(executor, id).await
     }
@@ -171,7 +171,7 @@ pub trait Crud:
         size: u64,
     ) -> Result<Page<Self>>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::paginate::<Self, E>(executor, builder, page, size).await
     }
@@ -187,7 +187,7 @@ pub trait Crud:
     /// 返回最多 1000 条记录的向量
     async fn find_all<E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::find_all::<Self, E>(executor, builder).await
     }
@@ -204,7 +204,7 @@ pub trait Crud:
     /// 返回单条记录，如果未找到则返回 None
     async fn find_one<E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<Self>>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::find_one::<Self, E>(executor, builder).await
     }
@@ -220,7 +220,7 @@ pub trait Crud:
     /// 返回符合条件的记录数量
     async fn count<E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
     where
-        E: DbExecutor + Send,
+        E: DbExecutor,
     {
         crate::crud::count::<Self, E>(executor, builder).await
     }
