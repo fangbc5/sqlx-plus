@@ -32,7 +32,7 @@ pub trait Crud:
 {
     /// 根据 ID 查找记录
     async fn find_by_id<E>(
-        executor: &mut E,
+        executor: &E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -43,13 +43,13 @@ pub trait Crud:
             + Sync,
     ) -> Result<Option<Self>>
     where
-        E: DbExecutor,
+        E: DbExecutor + Send + Sync,
     {
         crate::crud::find_by_id::<Self, E>(executor, id).await
     }
 
     /// 根据多个 ID 查找记录
-    async fn find_by_ids<I, E>(executor: &mut E, ids: I) -> Result<Vec<Self>>
+    async fn find_by_ids<I, E>(executor: &E, ids: I) -> Result<Vec<Self>>
     where
         I: IntoIterator + Send,
         I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
@@ -61,7 +61,7 @@ pub trait Crud:
             + Send
             + Sync
             + Clone,
-        E: DbExecutor,
+        E: DbExecutor + Send + Sync,
     {
         crate::crud::find_by_ids::<Self, I, E>(executor, ids).await
     }
@@ -165,13 +165,13 @@ pub trait Crud:
 
     /// 分页查询
     async fn paginate<E>(
-        executor: &mut E,
+        executor: &E,
         builder: QueryBuilder,
         page: u64,
         size: u64,
     ) -> Result<Page<Self>>
     where
-        E: DbExecutor,
+        E: DbExecutor + Send + Sync,
     {
         crate::crud::paginate::<Self, E>(executor, builder, page, size).await
     }
@@ -185,9 +185,9 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回最多 1000 条记录的向量
-    async fn find_all<E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
+    async fn find_all<E>(executor: &E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
     where
-        E: DbExecutor,
+        E: DbExecutor + Send + Sync,
     {
         crate::crud::find_all::<Self, E>(executor, builder).await
     }
@@ -202,9 +202,9 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回单条记录，如果未找到则返回 None
-    async fn find_one<E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<Self>>
+    async fn find_one<E>(executor: &E, builder: QueryBuilder) -> Result<Option<Self>>
     where
-        E: DbExecutor,
+        E: DbExecutor + Send + Sync,
     {
         crate::crud::find_one::<Self, E>(executor, builder).await
     }
@@ -218,9 +218,9 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回符合条件的记录数量
-    async fn count<E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
+    async fn count<E>(executor: &E, builder: QueryBuilder) -> Result<u64>
     where
-        E: DbExecutor,
+        E: DbExecutor + Send + Sync,
     {
         crate::crud::count::<Self, E>(executor, builder).await
     }
