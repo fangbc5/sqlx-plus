@@ -17,15 +17,3 @@ pub struct ModelMeta {
     pub pk: &'static str,
     pub fields: &'static [FieldMeta],
 }
-
-/// 执行插入操作的辅助函数（供宏使用）
-pub async fn execute_insert(
-    _pool: &DbPool,
-    _sql: &str,
-    _binds: &[&dyn sqlx::Encode<'_, sqlx::MySql>],
-) -> Result<crate::crud::Id> {
-    // 这个函数会被宏生成的代码调用
-    // 实际实现需要根据不同的数据库驱动进行适配
-    todo!("This function should be implemented by the macro-generated code")
-}
-

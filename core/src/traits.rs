@@ -32,7 +32,7 @@ pub trait Crud:
 {
     /// 根据 ID 查找记录
     async fn find_by_id<E>(
-        executor: &E,
+        executor: &mut E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -49,7 +49,7 @@ pub trait Crud:
     }
 
     /// 根据多个 ID 查找记录
-    async fn find_by_ids<I, E>(executor: &E, ids: I) -> Result<Vec<Self>>
+    async fn find_by_ids<I, E>(executor: &mut E, ids: I) -> Result<Vec<Self>>
     where
         I: IntoIterator + Send,
         I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
@@ -165,7 +165,7 @@ pub trait Crud:
 
     /// 分页查询
     async fn paginate<E>(
-        executor: &E,
+        executor: &mut E,
         builder: QueryBuilder,
         page: u64,
         size: u64,
@@ -185,7 +185,7 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回最多 1000 条记录的向量
-    async fn find_all<E>(executor: &E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
+    async fn find_all<E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
     where
         E: DbExecutor + Send + Sync,
     {
@@ -202,7 +202,7 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回单条记录，如果未找到则返回 None
-    async fn find_one<E>(executor: &E, builder: QueryBuilder) -> Result<Option<Self>>
+    async fn find_one<E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<Self>>
     where
         E: DbExecutor + Send + Sync,
     {
@@ -218,7 +218,7 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回符合条件的记录数量
-    async fn count<E>(executor: &E, builder: QueryBuilder) -> Result<u64>
+    async fn count<E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
     where
         E: DbExecutor + Send + Sync,
     {

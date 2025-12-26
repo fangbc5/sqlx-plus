@@ -6,6 +6,39 @@ use sqlx::Row;
 /// 主键 ID 类型
 pub type Id = i64;
 
+/// 辅助函数：将单个绑定值应用到查询中
+/// 这是一个通用的绑定逻辑，通过宏来应用到不同的查询类型
+macro_rules! apply_bind_value {
+    ($query:expr, $bind:expr) => {
+        match $bind {
+            BindValue::String(s) => {
+                $query = $query.bind(s);
+            }
+            BindValue::Int64(i) => {
+                $query = $query.bind(i);
+            }
+            BindValue::Int32(i) => {
+                $query = $query.bind(*i);
+            }
+            BindValue::Int16(i) => {
+                $query = $query.bind(*i);
+            }
+            BindValue::Float64(f) => {
+                $query = $query.bind(f);
+            }
+            BindValue::Float32(f) => {
+                $query = $query.bind(*f);
+            }
+            BindValue::Bool(b) => {
+                $query = $query.bind(b);
+            }
+            BindValue::Null => {
+                $query = $query.bind(Option::<String>::None);
+            }
+        }
+    };
+}
+
 /// 辅助函数：将绑定值应用到查询中（用于 query_as）
 #[cfg(feature = "mysql")]
 fn apply_binds_to_query_as_mysql<'q, M>(
@@ -16,32 +49,7 @@ where
     M: for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>,
 {
     for bind in binds {
-        match bind {
-            BindValue::String(s) => {
-                query = query.bind(s);
-            }
-            BindValue::Int64(i) => {
-                query = query.bind(i);
-            }
-            BindValue::Int32(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Int16(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Float64(f) => {
-                query = query.bind(f);
-            }
-            BindValue::Float32(f) => {
-                query = query.bind(*f);
-            }
-            BindValue::Bool(b) => {
-                query = query.bind(b);
-            }
-            BindValue::Null => {
-                query = query.bind(Option::<String>::None);
-            }
-        }
+        apply_bind_value!(query, bind);
     }
     query
 }
@@ -56,32 +64,7 @@ where
     M: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
 {
     for bind in binds {
-        match bind {
-            BindValue::String(s) => {
-                query = query.bind(s);
-            }
-            BindValue::Int64(i) => {
-                query = query.bind(i);
-            }
-            BindValue::Int32(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Int16(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Float64(f) => {
-                query = query.bind(f);
-            }
-            BindValue::Float32(f) => {
-                query = query.bind(*f);
-            }
-            BindValue::Bool(b) => {
-                query = query.bind(b);
-            }
-            BindValue::Null => {
-                query = query.bind(Option::<String>::None);
-            }
-        }
+        apply_bind_value!(query, bind);
     }
     query
 }
@@ -96,32 +79,7 @@ where
     M: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>,
 {
     for bind in binds {
-        match bind {
-            BindValue::String(s) => {
-                query = query.bind(s);
-            }
-            BindValue::Int64(i) => {
-                query = query.bind(i);
-            }
-            BindValue::Int32(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Int16(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Float64(f) => {
-                query = query.bind(f);
-            }
-            BindValue::Float32(f) => {
-                query = query.bind(*f);
-            }
-            BindValue::Bool(b) => {
-                query = query.bind(b);
-            }
-            BindValue::Null => {
-                query = query.bind(Option::<String>::None);
-            }
-        }
+        apply_bind_value!(query, bind);
     }
     query
 }
@@ -133,32 +91,7 @@ fn apply_binds_to_query_mysql<'q>(
     binds: &'q [BindValue],
 ) -> sqlx::query::Query<'q, sqlx::MySql, sqlx::mysql::MySqlArguments> {
     for bind in binds {
-        match bind {
-            BindValue::String(s) => {
-                query = query.bind(s);
-            }
-            BindValue::Int64(i) => {
-                query = query.bind(i);
-            }
-            BindValue::Int32(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Int16(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Float64(f) => {
-                query = query.bind(f);
-            }
-            BindValue::Float32(f) => {
-                query = query.bind(*f);
-            }
-            BindValue::Bool(b) => {
-                query = query.bind(b);
-            }
-            BindValue::Null => {
-                query = query.bind(Option::<String>::None);
-            }
-        }
+        apply_bind_value!(query, bind);
     }
     query
 }
@@ -170,32 +103,7 @@ fn apply_binds_to_query_postgres<'q>(
     binds: &'q [BindValue],
 ) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
     for bind in binds {
-        match bind {
-            BindValue::String(s) => {
-                query = query.bind(s);
-            }
-            BindValue::Int64(i) => {
-                query = query.bind(i);
-            }
-            BindValue::Int32(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Int16(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Float64(f) => {
-                query = query.bind(f);
-            }
-            BindValue::Float32(f) => {
-                query = query.bind(*f);
-            }
-            BindValue::Bool(b) => {
-                query = query.bind(b);
-            }
-            BindValue::Null => {
-                query = query.bind(Option::<String>::None);
-            }
-        }
+        apply_bind_value!(query, bind);
     }
     query
 }
@@ -207,32 +115,7 @@ fn apply_binds_to_query_sqlite<'q>(
     binds: &'q [BindValue],
 ) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
     for bind in binds {
-        match bind {
-            BindValue::String(s) => {
-                query = query.bind(s);
-            }
-            BindValue::Int64(i) => {
-                query = query.bind(i);
-            }
-            BindValue::Int32(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Int16(i) => {
-                query = query.bind(*i);
-            }
-            BindValue::Float64(f) => {
-                query = query.bind(f);
-            }
-            BindValue::Float32(f) => {
-                query = query.bind(*f);
-            }
-            BindValue::Bool(b) => {
-                query = query.bind(b);
-            }
-            BindValue::Null => {
-                query = query.bind(Option::<String>::None);
-            }
-        }
+        apply_bind_value!(query, bind);
     }
     query
 }
@@ -266,7 +149,7 @@ impl<T> Page<T> {
 
 /// 根据 ID 查找记录
 pub async fn find_by_id<M, E>(
-    executor: &E,
+    executor: &mut E,
     id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
         + for<'q> sqlx::Encode<'q, sqlx::Postgres>
         + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -300,7 +183,21 @@ where
     match executor.driver() {
         #[cfg(feature = "mysql")]
         crate::db_pool::DbDriver::MySql => {
-            if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                match sqlx::query(&sql)
+                    .bind(id)
+                    .fetch_optional(&mut **tx_ref)
+                    .await?
+                {
+                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                            e,
+                        )))
+                    })?)),
+                    None => Ok(None),
+                }
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
                         crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
@@ -315,7 +212,21 @@ where
         }
         #[cfg(feature = "postgres")]
         crate::db_pool::DbDriver::Postgres => {
-            if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                match sqlx::query(&sql)
+                    .bind(id)
+                    .fetch_optional(&mut **tx_ref)
+                    .await?
+                {
+                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                            e,
+                        )))
+                    })?)),
+                    None => Ok(None),
+                }
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
                         crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
@@ -330,7 +241,21 @@ where
         }
         #[cfg(feature = "sqlite")]
         crate::db_pool::DbDriver::Sqlite => {
-            if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                match sqlx::query(&sql)
+                    .bind(id)
+                    .fetch_optional(&mut **tx_ref)
+                    .await?
+                {
+                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                            e,
+                        )))
+                    })?)),
+                    None => Ok(None),
+                }
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
                         crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
@@ -349,7 +274,7 @@ where
 }
 
 /// 根据多个 ID 查找记录
-pub async fn find_by_ids<M, I, E>(executor: &E, ids: I) -> Result<Vec<M>>
+pub async fn find_by_ids<M, I, E>(executor: &mut E, ids: I) -> Result<Vec<M>>
 where
     M: Model
         + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
@@ -408,7 +333,13 @@ where
             for id in &ids_vec {
                 query = query.bind(id.clone());
             }
-            if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                query
+                    .fetch_all(&mut **tx_ref)
+                    .await
+                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 query
                     .fetch_all(pool_ref)
                     .await
@@ -423,7 +354,13 @@ where
             for id in &ids_vec {
                 query = query.bind(id.clone());
             }
-            if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                query
+                    .fetch_all(&mut **tx_ref)
+                    .await
+                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 query
                     .fetch_all(pool_ref)
                     .await
@@ -438,7 +375,13 @@ where
             for id in &ids_vec {
                 query = query.bind(id.clone());
             }
-            if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                query
+                    .fetch_all(&mut **tx_ref)
+                    .await
+                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query
                     .fetch_all(pool_ref)
                     .await
@@ -632,7 +575,7 @@ where
 
 /// 安全查询所有记录（限制最多 1000 条）
 /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-pub async fn find_all<M, E>(executor: &E, builder: Option<QueryBuilder>) -> Result<Vec<M>>
+pub async fn find_all<M, E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<M>>
 where
     M: Model
         + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
@@ -668,7 +611,10 @@ where
         crate::db_pool::DbDriver::MySql => {
             let query = sqlx::query_as::<sqlx::MySql, M>(&sql);
             let query = apply_binds_to_query_as_mysql(query, &binds);
-            if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                query.fetch_all(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -678,7 +624,10 @@ where
         crate::db_pool::DbDriver::Postgres => {
             let query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
             let query = apply_binds_to_query_as_postgres(query, &binds);
-            if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                query.fetch_all(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -688,7 +637,10 @@ where
         crate::db_pool::DbDriver::Sqlite => {
             let query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
             let query = apply_binds_to_query_as_sqlite(query, &binds);
-            if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                query.fetch_all(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -709,7 +661,7 @@ where
 /// 查询单条记录（使用 QueryBuilder）
 /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
 /// 自动添加 LIMIT 1 限制
-pub async fn find_one<M, E>(executor: &E, builder: QueryBuilder) -> Result<Option<M>>
+pub async fn find_one<M, E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<M>>
 where
     M: Model
         + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
@@ -744,7 +696,10 @@ where
         crate::db_pool::DbDriver::MySql => {
             let query = sqlx::query_as::<sqlx::MySql, M>(&sql);
             let query = apply_binds_to_query_as_mysql(query, &binds);
-            if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                query.fetch_optional(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_optional(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -754,7 +709,10 @@ where
         crate::db_pool::DbDriver::Postgres => {
             let query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
             let query = apply_binds_to_query_as_postgres(query, &binds);
-            if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                query.fetch_optional(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_optional(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -764,7 +722,10 @@ where
         crate::db_pool::DbDriver::Sqlite => {
             let query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
             let query = apply_binds_to_query_as_sqlite(query, &binds);
-            if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                query.fetch_optional(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_optional(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -784,7 +745,7 @@ where
 
 /// 分页查询
 pub async fn paginate<M, E>(
-    executor: &E,
+    executor: &mut E,
     mut builder: QueryBuilder,
     page: u64,
     size: u64,
@@ -820,7 +781,10 @@ where
         crate::db_pool::DbDriver::MySql => {
             let query = sqlx::query(&count_sql);
             let query = apply_binds_to_query_mysql(query, &binds);
-            let row = if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            let row = if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                query.fetch_one(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -831,7 +795,10 @@ where
         crate::db_pool::DbDriver::Postgres => {
             let query = sqlx::query(&count_sql);
             let query = apply_binds_to_query_postgres(query, &binds);
-            let row = if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            let row = if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                query.fetch_one(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -842,7 +809,10 @@ where
         crate::db_pool::DbDriver::Sqlite => {
             let query = sqlx::query(&count_sql);
             let query = apply_binds_to_query_sqlite(query, &binds);
-            let row = if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            let row = if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                query.fetch_one(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -860,7 +830,10 @@ where
         crate::db_pool::DbDriver::MySql => {
             let query = sqlx::query_as::<sqlx::MySql, M>(&data_sql);
             let query = apply_binds_to_query_as_mysql(query, &binds);
-            if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                query.fetch_all(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -870,7 +843,10 @@ where
         crate::db_pool::DbDriver::Postgres => {
             let query = sqlx::query_as::<sqlx::Postgres, M>(&data_sql);
             let query = apply_binds_to_query_as_postgres(query, &binds);
-            if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                query.fetch_all(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -880,7 +856,10 @@ where
         crate::db_pool::DbDriver::Sqlite => {
             let query = sqlx::query_as::<sqlx::Sqlite, M>(&data_sql);
             let query = apply_binds_to_query_as_sqlite(query, &binds);
-            if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                query.fetch_all(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -900,7 +879,7 @@ where
 
 /// 统计记录数量（使用 QueryBuilder）
 /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-pub async fn count<M, E>(executor: &E, builder: QueryBuilder) -> Result<u64>
+pub async fn count<M, E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
 where
     M: Model,
     E: crate::executor::DbExecutor,
@@ -927,7 +906,10 @@ where
         crate::db_pool::DbDriver::MySql => {
             let query = sqlx::query(&count_sql);
             let query = apply_binds_to_query_mysql(query, &binds);
-            let row = if let Some(pool_ref) = executor.mysql_pool() {
+            // 优先使用事务，获取不到再使用池
+            let row = if let Some(tx_ref) = executor.mysql_transaction_ref() {
+                query.fetch_one(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -938,7 +920,10 @@ where
         crate::db_pool::DbDriver::Postgres => {
             let query = sqlx::query(&count_sql);
             let query = apply_binds_to_query_postgres(query, &binds);
-            let row = if let Some(pool_ref) = executor.pg_pool() {
+            // 优先使用事务，获取不到再使用池
+            let row = if let Some(tx_ref) = executor.postgres_transaction_ref() {
+                query.fetch_one(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
@@ -949,7 +934,10 @@ where
         crate::db_pool::DbDriver::Sqlite => {
             let query = sqlx::query(&count_sql);
             let query = apply_binds_to_query_sqlite(query, &binds);
-            let row = if let Some(pool_ref) = executor.sqlite_pool() {
+            // 优先使用事务，获取不到再使用池
+            let row = if let Some(tx_ref) = executor.sqlite_transaction_ref() {
+                query.fetch_one(&mut **tx_ref).await?
+            } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
                 return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
