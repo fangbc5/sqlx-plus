@@ -1,4 +1,4 @@
-use crate::db_pool::Result;
+use crate::error::{SqlxPlusError, Result};
 use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
 use sqlx::Row;
@@ -191,7 +191,7 @@ where
                     .await?
                 {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
                             e,
                         )))
                     })?)),
@@ -200,14 +200,14 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
                             e,
                         )))
                     })?)),
                     None => Ok(None),
                 }
             } else {
-                Err(crate::db_pool::DbPoolError::NoPoolAvailable)
+                Err(SqlxPlusError::NoPoolAvailable)
             }
         }
         #[cfg(feature = "postgres")]
@@ -220,7 +220,7 @@ where
                     .await?
                 {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
                             e,
                         )))
                     })?)),
@@ -229,14 +229,14 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
                             e,
                         )))
                     })?)),
                     None => Ok(None),
                 }
             } else {
-                Err(crate::db_pool::DbPoolError::NoPoolAvailable)
+                Err(SqlxPlusError::NoPoolAvailable)
             }
         }
         #[cfg(feature = "sqlite")]
@@ -249,7 +249,7 @@ where
                     .await?
                 {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
                             e,
                         )))
                     })?)),
@@ -258,18 +258,18 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
                     Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(
+                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
                             e,
                         )))
                     })?)),
                     None => Ok(None),
                 }
             } else {
-                Err(crate::db_pool::DbPoolError::NoPoolAvailable)
+                Err(SqlxPlusError::NoPoolAvailable)
             }
         }
         #[allow(unreachable_patterns)]
-        _ => Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+        _ => Err(SqlxPlusError::NoPoolAvailable),
     }
 }
 
@@ -338,14 +338,14 @@ where
                 query
                     .fetch_all(&mut **tx_ref)
                     .await
-                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+                    .map_err(|e| SqlxPlusError::DatabaseError(e))
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 query
                     .fetch_all(pool_ref)
                     .await
-                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+                    .map_err(|e| SqlxPlusError::DatabaseError(e))
             } else {
-                Err(crate::db_pool::DbPoolError::NoPoolAvailable)
+                Err(SqlxPlusError::NoPoolAvailable)
             }
         }
         #[cfg(feature = "postgres")]
@@ -359,14 +359,14 @@ where
                 query
                     .fetch_all(&mut **tx_ref)
                     .await
-                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+                    .map_err(|e| SqlxPlusError::DatabaseError(e))
             } else if let Some(pool_ref) = executor.pg_pool() {
                 query
                     .fetch_all(pool_ref)
                     .await
-                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+                    .map_err(|e| SqlxPlusError::DatabaseError(e))
             } else {
-                Err(crate::db_pool::DbPoolError::NoPoolAvailable)
+                Err(SqlxPlusError::NoPoolAvailable)
             }
         }
         #[cfg(feature = "sqlite")]
@@ -380,18 +380,18 @@ where
                 query
                     .fetch_all(&mut **tx_ref)
                     .await
-                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+                    .map_err(|e| SqlxPlusError::DatabaseError(e))
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query
                     .fetch_all(pool_ref)
                     .await
-                    .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+                    .map_err(|e| SqlxPlusError::DatabaseError(e))
             } else {
-                Err(crate::db_pool::DbPoolError::NoPoolAvailable)
+                Err(SqlxPlusError::NoPoolAvailable)
             }
         }
         #[allow(unreachable_patterns)]
-        _ => Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+        _ => Err(SqlxPlusError::NoPoolAvailable),
     }
 }
 
@@ -403,7 +403,7 @@ where
 {
     // 这个函数应该由 derive(CRUD) 宏生成具体实现
     // 这里提供一个占位实现
-    Err(crate::db_pool::DbPoolError::ConnectionError(
+    Err(SqlxPlusError::DatabaseError(
         sqlx::Error::Configuration("insert() must be implemented by derive(CRUD) macro".into()),
     ))
 }
@@ -416,7 +416,7 @@ where
 {
     // 这个函数应该由 derive(CRUD) 宏生成具体实现
     // 这里提供一个占位实现
-    Err(crate::db_pool::DbPoolError::ConnectionError(
+    Err(SqlxPlusError::DatabaseError(
         sqlx::Error::Configuration("update() must be implemented by derive(CRUD) macro".into()),
     ))
 }
@@ -430,7 +430,7 @@ where
     M: Model,
     E: crate::executor::DbExecutor,
 {
-    Err(crate::db_pool::DbPoolError::ConnectionError(
+    Err(SqlxPlusError::DatabaseError(
         sqlx::Error::Configuration(
             "update_with_none() must be implemented by derive(CRUD) macro".into(),
         ),
@@ -468,7 +468,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 sqlx::query(&sql).bind(id).execute(pool_ref).await?;
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "postgres")]
@@ -478,7 +478,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 sqlx::query(&sql).bind(id).execute(pool_ref).await?;
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "sqlite")]
@@ -488,11 +488,11 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 sqlx::query(&sql).bind(id).execute(pool_ref).await?;
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[allow(unreachable_patterns)]
-        _ => return Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+        _ => return Err(SqlxPlusError::NoPoolAvailable),
     }
 
     Ok(())
@@ -515,7 +515,7 @@ where
     E: crate::executor::DbExecutor,
 {
     let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
-        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Configuration(
+        SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
             format!(
                 "Model {} does not have SOFT_DELETE_FIELD defined",
                 std::any::type_name::<M>()
@@ -543,7 +543,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 sqlx::query(&sql).bind(id).execute(pool_ref).await?;
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "postgres")]
@@ -553,7 +553,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 sqlx::query(&sql).bind(id).execute(pool_ref).await?;
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "sqlite")]
@@ -563,11 +563,11 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 sqlx::query(&sql).bind(id).execute(pool_ref).await?;
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[allow(unreachable_patterns)]
-        _ => return Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+        _ => return Err(SqlxPlusError::NoPoolAvailable),
     }
 
     Ok(())
@@ -617,7 +617,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "postgres")]
@@ -630,7 +630,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "sqlite")]
@@ -643,12 +643,12 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[allow(unreachable_patterns)]
         _ => {
-            return Err(crate::db_pool::DbPoolError::UnsupportedDatabase(format!(
+            return Err(SqlxPlusError::UnsupportedDatabase(format!(
                 "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
                 driver
             )))
@@ -702,7 +702,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_optional(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "postgres")]
@@ -715,7 +715,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_optional(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "sqlite")]
@@ -728,12 +728,12 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_optional(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[allow(unreachable_patterns)]
         _ => {
-            return Err(crate::db_pool::DbPoolError::UnsupportedDatabase(format!(
+            return Err(SqlxPlusError::UnsupportedDatabase(format!(
                 "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
                 driver
             )))
@@ -787,7 +787,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             };
             row.get::<i64, _>(0) as u64
         }
@@ -801,7 +801,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             };
             row.get::<i64, _>(0) as u64
         }
@@ -815,12 +815,12 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             };
             row.get::<i64, _>(0) as u64
         }
         #[allow(unreachable_patterns)]
-        _ => return Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+        _ => return Err(SqlxPlusError::NoPoolAvailable),
     };
 
     // 获取分页数据
@@ -836,7 +836,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "postgres")]
@@ -849,7 +849,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[cfg(feature = "sqlite")]
@@ -862,12 +862,12 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_all(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             }
         }
         #[allow(unreachable_patterns)]
         _ => {
-            return Err(crate::db_pool::DbPoolError::UnsupportedDatabase(format!(
+            return Err(SqlxPlusError::UnsupportedDatabase(format!(
                 "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
                 driver
             )))
@@ -912,7 +912,7 @@ where
             } else if let Some(pool_ref) = executor.mysql_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             };
             row.get::<i64, _>(0) as u64
         }
@@ -926,7 +926,7 @@ where
             } else if let Some(pool_ref) = executor.pg_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             };
             row.get::<i64, _>(0) as u64
         }
@@ -940,12 +940,12 @@ where
             } else if let Some(pool_ref) = executor.sqlite_pool() {
                 query.fetch_one(pool_ref).await?
             } else {
-                return Err(crate::db_pool::DbPoolError::NoPoolAvailable);
+                return Err(SqlxPlusError::NoPoolAvailable);
             };
             row.get::<i64, _>(0) as u64
         }
         #[allow(unreachable_patterns)]
-        _ => return Err(crate::db_pool::DbPoolError::NoPoolAvailable),
+        _ => return Err(SqlxPlusError::NoPoolAvailable),
     };
 
     Ok(total)

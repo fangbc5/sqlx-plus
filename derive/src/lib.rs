@@ -292,7 +292,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #[async_trait::async_trait]
         impl sqlxplus::Crud for #name {
-            async fn insert<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id>
+            async fn insert<E>(&self, mut executor: E) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id>
             where
                 E: sqlxplus::executor::DbExecutor + Send,
             {
@@ -416,7 +416,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 }
             }
 
-            async fn update<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<()>
+            async fn update<E>(&self, mut executor: E) -> sqlxplus::db_pool::Result<()>
             where
                 E: sqlxplus::executor::DbExecutor + Send,
             {
@@ -533,7 +533,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             /// - Option 字段：
             ///   - Some(v)：col = ?
             ///   - None：col = DEFAULT（由数据库决定置空或使用默认值）
-            async fn update_with_none<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<()>
+            async fn update_with_none<E>(&self, mut executor: E) -> sqlxplus::db_pool::Result<()>
             where
                 E: sqlxplus::executor::DbExecutor + Send,
             {

@@ -1,5 +1,5 @@
 use crate::crud::{Id, Page};
-use crate::db_pool::Result;
+use crate::error::Result;
 use crate::executor::DbExecutor;
 use crate::query_builder::QueryBuilder;
 

@@ -1,4 +1,5 @@
-use crate::db_pool::{DbDriver, DbPool, DbPoolError, Result};
+use crate::db_pool::{DbDriver, DbPool};
+use crate::error::{SqlxPlusError, Result};
 use crate::executor::DbExecutor;
 use std::future::Future;
 use std::pin::Pin;
@@ -38,16 +39,16 @@ macro_rules! transaction {
 /// 数据库事务包装器
 /// 自动处理提交和回滚
 #[derive(Debug)]
-pub enum Transaction {
+pub enum Transaction<'tx> {
     #[cfg(feature = "mysql")]
-    MySql(sqlx::Transaction<'static, sqlx::MySql>),
+    MySql(sqlx::Transaction<'tx, sqlx::MySql>),
     #[cfg(feature = "postgres")]
-    Postgres(sqlx::Transaction<'static, sqlx::Postgres>),
+    Postgres(sqlx::Transaction<'tx, sqlx::Postgres>),
     #[cfg(feature = "sqlite")]
-    Sqlite(sqlx::Transaction<'static, sqlx::Sqlite>),
+    Sqlite(sqlx::Transaction<'tx, sqlx::Sqlite>),
 }
 
-impl Transaction {
+impl<'tx> Transaction<'tx> {
     /// 获取事务的驱动类型
     pub fn driver(&self) -> DbDriver {
         match self {
@@ -65,17 +66,17 @@ impl Transaction {
         match self {
             #[cfg(feature = "mysql")]
             Transaction::MySql(tx) => {
-                tx.commit().await.map_err(DbPoolError::ConnectionError)?;
+                tx.commit().await.map_err(SqlxPlusError::DatabaseError)?;
                 Ok(())
             }
             #[cfg(feature = "postgres")]
             Transaction::Postgres(tx) => {
-                tx.commit().await.map_err(DbPoolError::ConnectionError)?;
+                tx.commit().await.map_err(SqlxPlusError::DatabaseError)?;
                 Ok(())
             }
             #[cfg(feature = "sqlite")]
             Transaction::Sqlite(tx) => {
-                tx.commit().await.map_err(DbPoolError::ConnectionError)?;
+                tx.commit().await.map_err(SqlxPlusError::DatabaseError)?;
                 Ok(())
             }
         }
@@ -86,17 +87,17 @@ impl Transaction {
         match self {
             #[cfg(feature = "mysql")]
             Transaction::MySql(tx) => {
-                tx.rollback().await.map_err(DbPoolError::ConnectionError)?;
+                tx.rollback().await.map_err(SqlxPlusError::DatabaseError)?;
                 Ok(())
             }
             #[cfg(feature = "postgres")]
             Transaction::Postgres(tx) => {
-                tx.rollback().await.map_err(DbPoolError::ConnectionError)?;
+                tx.rollback().await.map_err(SqlxPlusError::DatabaseError)?;
                 Ok(())
             }
             #[cfg(feature = "sqlite")]
             Transaction::Sqlite(tx) => {
-                tx.rollback().await.map_err(DbPoolError::ConnectionError)?;
+                tx.rollback().await.map_err(SqlxPlusError::DatabaseError)?;
                 Ok(())
             }
         }
@@ -104,7 +105,7 @@ impl Transaction {
 
     /// 获取 MySQL 事务引用（如果适用）
     #[cfg(feature = "mysql")]
-    pub fn mysql_transaction(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::MySql>> {
+    pub fn mysql_transaction(&mut self) -> Option<&mut sqlx::Transaction<'tx, sqlx::MySql>> {
         match self {
             Transaction::MySql(tx) => Some(tx),
             _ => None,
@@ -115,7 +116,7 @@ impl Transaction {
     #[cfg(feature = "postgres")]
     pub fn postgres_transaction(
         &mut self,
-    ) -> Option<&mut sqlx::Transaction<'static, sqlx::Postgres>> {
+    ) -> Option<&mut sqlx::Transaction<'tx, sqlx::Postgres>> {
         match self {
             Transaction::Postgres(tx) => Some(tx),
             _ => None,
@@ -124,7 +125,7 @@ impl Transaction {
 
     /// 获取 SQLite 事务引用（如果适用）
     #[cfg(feature = "sqlite")]
-    pub fn sqlite_transaction(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pub fn sqlite_transaction(&mut self) -> Option<&mut sqlx::Transaction<'tx, sqlx::Sqlite>> {
         match self {
             Transaction::Sqlite(tx) => Some(tx),
             _ => None,
@@ -132,7 +133,7 @@ impl Transaction {
     }
 }
 
-impl DbExecutor for Transaction {
+impl<'tx> DbExecutor for Transaction<'tx> {
     fn driver(&self) -> DbDriver {
         self.driver()
     }
@@ -148,8 +149,13 @@ impl DbExecutor for Transaction {
 
     #[cfg(feature = "mysql")]
     fn mysql_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::MySql>> {
+        // 注意：这里需要将 'tx 转换为 'static
+        // 由于 Transaction 是从 Arc<Pool> 创建的，实际上是安全的
         match self {
-            Transaction::MySql(tx) => Some(tx),
+            Transaction::MySql(tx) => {
+                // 使用 unsafe 转换，因为从 Arc<Pool> 创建的 transaction 实际上是 'static
+                unsafe { Some(std::mem::transmute(tx)) }
+            }
             _ => None,
         }
     }
@@ -164,7 +170,9 @@ impl DbExecutor for Transaction {
         &mut self,
     ) -> Option<&mut sqlx::Transaction<'static, sqlx::Postgres>> {
         match self {
-            Transaction::Postgres(tx) => Some(tx),
+            Transaction::Postgres(tx) => {
+                unsafe { Some(std::mem::transmute(tx)) }
+            }
             _ => None,
         }
     }
@@ -177,7 +185,9 @@ impl DbExecutor for Transaction {
     #[cfg(feature = "sqlite")]
     fn sqlite_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::Sqlite>> {
         match self {
-            Transaction::Sqlite(tx) => Some(tx),
+            Transaction::Sqlite(tx) => {
+                unsafe { Some(std::mem::transmute(tx)) }
+            }
             _ => None,
         }
     }
@@ -185,28 +195,32 @@ impl DbExecutor for Transaction {
 
 impl DbPool {
     /// 开始一个事务
-    pub async fn begin(&self) -> Result<Transaction> {
+    /// 
+    /// 注意：返回的 Transaction 的生命周期绑定到 DbPool，但由于 DbPool 内部使用 Arc，
+    /// 实际上事务可以安全地转换为 'static 生命周期
+    pub async fn begin(&self) -> Result<Transaction<'static>> {
         match self.driver() {
             #[cfg(feature = "mysql")]
             DbDriver::MySql => {
-                let pool = self.mysql_pool().ok_or(DbPoolError::NoPoolAvailable)?;
-                let tx = pool.begin().await.map_err(DbPoolError::ConnectionError)?;
-                Ok(Transaction::MySql(tx))
+                let pool = self.mysql_pool().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let tx = pool.begin().await.map_err(SqlxPlusError::DatabaseError)?;
+                // 从 Arc<Pool> 创建的 transaction 实际上是 'static
+                Ok(Transaction::MySql(unsafe { std::mem::transmute(tx) }))
             }
             #[cfg(feature = "postgres")]
             DbDriver::Postgres => {
-                let pool = self.pg_pool().ok_or(DbPoolError::NoPoolAvailable)?;
-                let tx = pool.begin().await.map_err(DbPoolError::ConnectionError)?;
-                Ok(Transaction::Postgres(tx))
+                let pool = self.pg_pool().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let tx = pool.begin().await.map_err(SqlxPlusError::DatabaseError)?;
+                Ok(Transaction::Postgres(unsafe { std::mem::transmute(tx) }))
             }
             #[cfg(feature = "sqlite")]
             DbDriver::Sqlite => {
-                let pool = self.sqlite_pool().ok_or(DbPoolError::NoPoolAvailable)?;
-                let tx = pool.begin().await.map_err(DbPoolError::ConnectionError)?;
-                Ok(Transaction::Sqlite(tx))
+                let pool = self.sqlite_pool().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let tx = pool.begin().await.map_err(SqlxPlusError::DatabaseError)?;
+                Ok(Transaction::Sqlite(unsafe { std::mem::transmute(tx) }))
             }
             #[allow(unreachable_patterns)]
-            _ => Err(DbPoolError::NoPoolAvailable),
+            _ => Err(SqlxPlusError::NoPoolAvailable),
         }
     }
 
@@ -214,10 +228,10 @@ impl DbPool {
     async fn transaction_boxed<F, T, E>(&self, f: F) -> std::result::Result<T, E>
     where
         for<'a> F: FnOnce(
-            &'a mut Transaction,
+            &'a mut Transaction<'static>,
         )
             -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>,
-        E: From<DbPoolError>,
+        E: From<SqlxPlusError>,
     {
         let mut tx = self.begin().await.map_err(E::from)?;
 
@@ -260,10 +274,10 @@ impl DbPool {
     pub async fn transaction<F, T, E>(&self, f: F) -> std::result::Result<T, E>
     where
         for<'a> F: FnOnce(
-            &'a mut Transaction,
+            &'a mut Transaction<'static>,
         )
             -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>,
-        E: From<DbPoolError>,
+        E: From<SqlxPlusError>,
     {
         self.transaction_boxed(f).await
     }
