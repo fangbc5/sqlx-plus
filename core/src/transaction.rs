@@ -1,40 +1,11 @@
-use crate::db_pool::{DbDriver, DbPool};
-use crate::error::{SqlxPlusError, Result};
-use crate::executor::DbExecutor;
 use std::future::Future;
 use std::pin::Pin;
 
-/// 宏：简化事务闭包的写法，自动处理 `Box::pin`
-///
-/// 使用示例：
-/// ```ignore
-/// // 使用引用
-/// sqlxplus::transaction!(&pool, |tx| async move {
-///     // 事务代码
-///     Ok(42)
-/// }).await?;
-///
-/// // 或直接使用值（会自动借用）
-/// sqlxplus::transaction!(pool, |tx| async move {
-///     // 事务代码
-///     Ok(42)
-/// }).await?;
-/// ```
-#[macro_export]
-macro_rules! transaction {
-    // 匹配引用形式：&pool
-    (&$pool:expr, |$tx:ident| async move $body:block) => {
-        $pool.transaction(|$tx| {
-            Box::pin(async move $body)
-        })
-    };
-    // 匹配值形式：pool（会自动借用）
-    ($pool:expr, |$tx:ident| async move $body:block) => {
-        $pool.transaction(|$tx| {
-            Box::pin(async move $body)
-        })
-    };
-}
+use sqlx::{MySqlConnection, PgConnection, SqliteConnection};
+
+use crate::db_pool::{DbDriver, DbPool};
+use crate::error::{SqlxPlusError, Result};
+
 
 /// 数据库事务包装器
 /// 自动处理提交和回滚
@@ -49,15 +20,17 @@ pub enum Transaction<'tx> {
 }
 
 impl<'tx> Transaction<'tx> {
-    /// 获取事务的驱动类型
-    pub fn driver(&self) -> DbDriver {
-        match self {
-            #[cfg(feature = "mysql")]
-            Transaction::MySql(_) => DbDriver::MySql,
-            #[cfg(feature = "postgres")]
-            Transaction::Postgres(_) => DbDriver::Postgres,
-            #[cfg(feature = "sqlite")]
-            Transaction::Sqlite(_) => DbDriver::Sqlite,
+    pub async fn begin(pool: &DbPool) -> Result<Self> {
+        match pool.driver() {
+            DbDriver::MySql => {
+                Ok(Transaction::MySql(pool.mysql_pool().ok_or(SqlxPlusError::NoPoolAvailable)?.begin().await?))
+            }
+            DbDriver::Postgres => {
+                Ok(Transaction::Postgres(pool.pg_pool().ok_or(SqlxPlusError::NoPoolAvailable)?.begin().await?))
+            }
+            DbDriver::Sqlite => {
+                Ok(Transaction::Sqlite(pool.sqlite_pool().ok_or(SqlxPlusError::NoPoolAvailable)?.begin().await?))
+            }
         }
     }
 
@@ -103,182 +76,85 @@ impl<'tx> Transaction<'tx> {
         }
     }
 
-    /// 获取 MySQL 事务引用（如果适用）
-    #[cfg(feature = "mysql")]
-    pub fn mysql_transaction(&mut self) -> Option<&mut sqlx::Transaction<'tx, sqlx::MySql>> {
+    pub fn as_mysql_executor(&mut self) -> &mut MySqlConnection {
         match self {
-            Transaction::MySql(tx) => Some(tx),
-            _ => None,
+            Transaction::MySql(tx) => tx,
+            _ => panic!("Transaction is not a MySQL transaction"),
         }
     }
 
-    /// 获取 PostgreSQL 事务引用（如果适用）
-    #[cfg(feature = "postgres")]
-    pub fn postgres_transaction(
-        &mut self,
-    ) -> Option<&mut sqlx::Transaction<'tx, sqlx::Postgres>> {
+    pub fn as_postgres_executor(&mut self) -> &mut PgConnection {
         match self {
-            Transaction::Postgres(tx) => Some(tx),
-            _ => None,
+            Transaction::Postgres(tx) => tx,
+            _ => panic!("Transaction is not a PostgreSQL transaction"),
         }
     }
 
-    /// 获取 SQLite 事务引用（如果适用）
-    #[cfg(feature = "sqlite")]
-    pub fn sqlite_transaction(&mut self) -> Option<&mut sqlx::Transaction<'tx, sqlx::Sqlite>> {
+    pub fn as_sqlite_executor(&mut self) -> &mut SqliteConnection {
         match self {
-            Transaction::Sqlite(tx) => Some(tx),
-            _ => None,
+            Transaction::Sqlite(tx) => tx,
+            _ => panic!("Transaction is not a SQLite transaction"),
+        }
+    }
+
+}
+
+pub async fn with_transaction<F, T>(pool: &DbPool, f: F) -> crate::Result<T>
+where
+    F: for<'a> FnOnce(
+        &'a mut Transaction<'_>,
+    ) -> Pin<Box<dyn Future<Output = crate::Result<T>> + Send + 'a>>,
+    T: Send,
+{
+    let mut tx = Transaction::begin(pool).await?;
+
+    match f(&mut tx).await {
+        Ok(result) => {
+            tx.commit().await?;
+            Ok(result)
+        }
+        Err(e) => {
+            // Explicitly rollback on error
+            // (Transaction would auto-rollback on drop anyway, but this makes it clearer)
+            let _ = tx.rollback().await;
+            Err(e)
         }
     }
 }
 
-impl<'tx> DbExecutor for Transaction<'tx> {
-    fn driver(&self) -> DbDriver {
-        self.driver()
-    }
+pub async fn with_nested_transaction<F, T>(
+    tx: &mut Transaction<'_>,
+    f: F,
+) -> crate::Result<T>
+where
+    F: for<'a> FnOnce(&'a mut Transaction<'_>) -> Pin<Box<dyn Future<Output = crate::Result<T>> + Send + 'a>>,
+    T: Send,
+{
+    // 获取事务的执行器
+    // let executor = match tx {
+    //     Transaction::MySql(tx) => ,
+    //     Transaction::Postgres(tx) => tx.as_postgres_executor(),
+    //     Transaction::Sqlite(tx) => tx.as_sqlite_executor(),
+    // };
+    // Create a savepoint
+    sqlx::query("SAVEPOINT nested_tx")
+        .execute(tx.as_mysql_executor())
+        .await?;
 
-    fn convert_sql(&self, sql: &str) -> String {
-        self.driver().convert_placeholders(sql)
-    }
-
-    #[cfg(feature = "mysql")]
-    fn mysql_pool(&self) -> Option<&sqlx::Pool<sqlx::MySql>> {
-        None
-    }
-
-    #[cfg(feature = "mysql")]
-    fn mysql_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::MySql>> {
-        // 注意：这里需要将 'tx 转换为 'static
-        // 由于 Transaction 是从 Arc<Pool> 创建的，实际上是安全的
-        match self {
-            Transaction::MySql(tx) => {
-                // 使用 unsafe 转换，因为从 Arc<Pool> 创建的 transaction 实际上是 'static
-                unsafe { Some(std::mem::transmute(tx)) }
-            }
-            _ => None,
+    match f(tx).await {
+        Ok(result) => {
+            // Release savepoint (equivalent to commit)
+            sqlx::query("RELEASE SAVEPOINT nested_tx")
+                .execute(tx.as_mysql_executor())
+                .await?;
+            Ok(result)
         }
-    }
-
-    #[cfg(feature = "postgres")]
-    fn pg_pool(&self) -> Option<&sqlx::Pool<sqlx::Postgres>> {
-        None
-    }
-
-    #[cfg(feature = "postgres")]
-    fn postgres_transaction_ref(
-        &mut self,
-    ) -> Option<&mut sqlx::Transaction<'static, sqlx::Postgres>> {
-        match self {
-            Transaction::Postgres(tx) => {
-                unsafe { Some(std::mem::transmute(tx)) }
-            }
-            _ => None,
+        Err(e) => {
+            // Rollback to savepoint
+            let _ = sqlx::query("ROLLBACK TO SAVEPOINT nested_tx")
+                .execute(tx.as_mysql_executor())
+                .await;
+            Err(e)
         }
-    }
-
-    #[cfg(feature = "sqlite")]
-    fn sqlite_pool(&self) -> Option<&sqlx::Pool<sqlx::Sqlite>> {
-        None
-    }
-
-    #[cfg(feature = "sqlite")]
-    fn sqlite_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::Sqlite>> {
-        match self {
-            Transaction::Sqlite(tx) => {
-                unsafe { Some(std::mem::transmute(tx)) }
-            }
-            _ => None,
-        }
-    }
-}
-
-impl DbPool {
-    /// 开始一个事务
-    /// 
-    /// 注意：返回的 Transaction 的生命周期绑定到 DbPool，但由于 DbPool 内部使用 Arc，
-    /// 实际上事务可以安全地转换为 'static 生命周期
-    pub async fn begin(&self) -> Result<Transaction<'static>> {
-        match self.driver() {
-            #[cfg(feature = "mysql")]
-            DbDriver::MySql => {
-                let pool = self.mysql_pool().ok_or(SqlxPlusError::NoPoolAvailable)?;
-                let tx = pool.begin().await.map_err(SqlxPlusError::DatabaseError)?;
-                // 从 Arc<Pool> 创建的 transaction 实际上是 'static
-                Ok(Transaction::MySql(unsafe { std::mem::transmute(tx) }))
-            }
-            #[cfg(feature = "postgres")]
-            DbDriver::Postgres => {
-                let pool = self.pg_pool().ok_or(SqlxPlusError::NoPoolAvailable)?;
-                let tx = pool.begin().await.map_err(SqlxPlusError::DatabaseError)?;
-                Ok(Transaction::Postgres(unsafe { std::mem::transmute(tx) }))
-            }
-            #[cfg(feature = "sqlite")]
-            DbDriver::Sqlite => {
-                let pool = self.sqlite_pool().ok_or(SqlxPlusError::NoPoolAvailable)?;
-                let tx = pool.begin().await.map_err(SqlxPlusError::DatabaseError)?;
-                Ok(Transaction::Sqlite(unsafe { std::mem::transmute(tx) }))
-            }
-            #[allow(unreachable_patterns)]
-            _ => Err(SqlxPlusError::NoPoolAvailable),
-        }
-    }
-
-    /// 内部实现：处理生命周期绑定的 BoxFuture
-    async fn transaction_boxed<F, T, E>(&self, f: F) -> std::result::Result<T, E>
-    where
-        for<'a> F: FnOnce(
-            &'a mut Transaction<'static>,
-        )
-            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>,
-        E: From<SqlxPlusError>,
-    {
-        let mut tx = self.begin().await.map_err(E::from)?;
-
-        match f(&mut tx).await {
-            Ok(result) => {
-                tx.commit().await.map_err(E::from)?;
-                Ok(result)
-            }
-            Err(e) => {
-                // 尝试回滚，但忽略回滚错误（因为原始错误更重要）
-                let _ = tx.rollback().await;
-                Err(e)
-            }
-        }
-    }
-
-    /// 在事务中执行闭包函数
-    /// 如果闭包返回 Ok，则自动提交事务
-    /// 如果闭包返回 Err，则自动回滚事务
-    ///
-    /// # 使用方式
-    ///
-    /// 方式1：直接使用（需要 `Box::pin`）：
-    /// ```ignore
-    /// pool.transaction(|tx| {
-    ///     Box::pin(async move {
-    ///         // 事务代码
-    ///         Ok(42)
-    ///     })
-    /// }).await?;
-    /// ```
-    ///
-    /// 方式2：使用宏（推荐，更简洁）：
-    /// ```ignore
-    /// sqlxplus::transaction!(pool, |tx| async move {
-    ///     // 事务代码
-    ///     Ok(42)
-    /// }).await?;
-    /// ```
-    pub async fn transaction<F, T, E>(&self, f: F) -> std::result::Result<T, E>
-    where
-        for<'a> F: FnOnce(
-            &'a mut Transaction<'static>,
-        )
-            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>,
-        E: From<SqlxPlusError>,
-    {
-        self.transaction_boxed(f).await
     }
 }
