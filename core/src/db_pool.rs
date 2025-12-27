@@ -226,7 +226,51 @@ impl DbPool {
     }
 }
 
-impl DbExecutor for DbPool {
+// 为 &DbPool 实现 DbExecutor，支持传递引用
+impl DbExecutor for &DbPool {
+    fn driver(&self) -> DbDriver {
+        self.driver
+    }
+
+    fn convert_sql(&self, sql: &str) -> String {
+        self.driver.convert_placeholders(sql)
+    }
+
+    #[cfg(feature = "mysql")]
+    fn mysql_pool(&self) -> Option<&Pool<sqlx::MySql>> {
+        self.mysql.as_deref()
+    }
+
+    #[cfg(feature = "mysql")]
+    fn mysql_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::MySql>> {
+        None
+    }
+
+    #[cfg(feature = "postgres")]
+    fn pg_pool(&self) -> Option<&Pool<sqlx::Postgres>> {
+        self.pg.as_deref()
+    }
+
+    #[cfg(feature = "postgres")]
+    fn postgres_transaction_ref(
+        &mut self,
+    ) -> Option<&mut sqlx::Transaction<'static, sqlx::Postgres>> {
+        None
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn sqlite_pool(&self) -> Option<&Pool<sqlx::Sqlite>> {
+        self.sqlite.as_deref()
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn sqlite_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::Sqlite>> {
+        None
+    }
+}
+
+// 为 &mut DbPool 实现 DbExecutor，支持传递可变引用
+impl DbExecutor for &mut DbPool {
     fn driver(&self) -> DbDriver {
         self.driver
     }

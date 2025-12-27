@@ -32,7 +32,7 @@ pub trait Crud:
 {
     /// 根据 ID 查找记录
     async fn find_by_id<E>(
-        executor: &mut E,
+        executor: E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -49,7 +49,7 @@ pub trait Crud:
     }
 
     /// 根据多个 ID 查找记录
-    async fn find_by_ids<I, E>(executor: &mut E, ids: I) -> Result<Vec<Self>>
+    async fn find_by_ids<I, E>(executor: E, ids: I) -> Result<Vec<Self>>
     where
         I: IntoIterator + Send,
         I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
@@ -67,7 +67,7 @@ pub trait Crud:
     }
 
     /// 插入记录
-    async fn insert<E>(&self, executor: &mut E) -> Result<Id>
+    async fn insert<E>(&self, executor: E) -> Result<Id>
     where
         E: DbExecutor,
     {
@@ -82,7 +82,7 @@ pub trait Crud:
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
     /// 默认实现委托给 `crate::crud::update`，具体 SQL 由 `derive(CRUD)` 宏生成。
-    async fn update<E>(&self, executor: &mut E) -> Result<()>
+    async fn update<E>(&self, executor: E) -> Result<()>
     where
         E: DbExecutor,
     {
@@ -97,7 +97,7 @@ pub trait Crud:
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
     /// 默认实现委托给 `crate::crud::update_with_none`，实际 SQL 由 `derive(CRUD)` 宏生成。
-    async fn update_with_none<E>(&self, executor: &mut E) -> Result<()>
+    async fn update_with_none<E>(&self, executor: E) -> Result<()>
     where
         E: DbExecutor,
     {
@@ -107,7 +107,7 @@ pub trait Crud:
     /// 根据 ID 删除记录
     /// 如果指定了 SOFT_DELETE_FIELD，则进行逻辑删除；否则进行物理删除
     async fn delete_by_id<E>(
-        executor: &mut E,
+        executor: E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -129,7 +129,7 @@ pub trait Crud:
 
     /// 根据 ID 进行逻辑删除（将逻辑删除字段设置为 1）
     async fn soft_delete_by_id<E>(
-        executor: &mut E,
+        executor: E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -147,7 +147,7 @@ pub trait Crud:
 
     /// 根据 ID 进行物理删除（真正删除记录）
     async fn hard_delete_by_id<E>(
-        executor: &mut E,
+        executor: E,
         id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
             + for<'q> sqlx::Encode<'q, sqlx::Postgres>
             + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -165,7 +165,7 @@ pub trait Crud:
 
     /// 分页查询
     async fn paginate<E>(
-        executor: &mut E,
+        executor: E,
         builder: QueryBuilder,
         page: u64,
         size: u64,
@@ -185,7 +185,7 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回最多 1000 条记录的向量
-    async fn find_all<E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
+    async fn find_all<E>(executor: E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
     where
         E: DbExecutor + Send + Sync,
     {
@@ -202,7 +202,7 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回单条记录，如果未找到则返回 None
-    async fn find_one<E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<Self>>
+    async fn find_one<E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
     where
         E: DbExecutor + Send + Sync,
     {
@@ -218,7 +218,7 @@ pub trait Crud:
     ///
     /// # 返回
     /// 返回符合条件的记录数量
-    async fn count<E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
+    async fn count<E>(executor: E, builder: QueryBuilder) -> Result<u64>
     where
         E: DbExecutor + Send + Sync,
     {

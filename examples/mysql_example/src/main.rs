@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id1 = user1.insert(&mut pool).await?;
+    let id1 = user1.insert(&pool).await?;
     println!("插入成功，ID: {}\n", id1);
 
     let user2 = User {
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id2 = user2.insert(&mut pool).await?;
+    let id2 = user2.insert(&pool).await?;
     println!("插入成功，ID: {}\n", id2);
 
     let user3 = User {
@@ -49,12 +49,12 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id3 = user3.insert(&mut pool).await?;
+    let id3 = user3.insert(&pool).await?;
     println!("插入成功，ID: {}\n", id3);
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
     println!("=== 2. FIND_BY_ID (根据 ID 查找) ===");
-    let found = User::find_by_id(&mut pool, id1).await?;
+    let found = User::find_by_id(&pool, id1).await?;
     println!(
         "找到用户: {:?}\n",
         found.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 3. FIND_BY_IDS (根据多个 ID 查找) ==========
     println!("=== 3. FIND_BY_IDS (根据多个 ID 查找) ===");
-    let users = User::find_by_ids(&mut pool, vec![id1, id2, id3]).await?;
+    let users = User::find_by_ids(&pool, vec![id1, id2, id3]).await?;
     println!("找到 {} 条记录:", users.len());
     for user in &users {
         println!("  ID={:?}, username={:?}", user.id, user.username);
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let builder = QueryBuilder::new("SELECT * FROM user")
         .and_eq("id", id1)
         .order_by("id", false);
-    let one_user = User::find_one(&mut pool, builder).await?;
+    let one_user = User::find_one(&pool, builder).await?;
     println!(
         "find_one 结果: {:?}\n",
         one_user.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -83,36 +83,36 @@ async fn main() -> anyhow::Result<()> {
     // ========== 5. COUNT (统计记录数量) ==========
     println!("=== 5. COUNT (统计记录数量) ===");
     let builder = QueryBuilder::new("SELECT * FROM user");
-    let total = User::count(&mut pool, builder).await?;
+    let total = User::count(&pool, builder).await?;
     println!("未删除的记录数: {}\n", total);
 
     // ========== 6. UPDATE (更新 - Patch 语义) ==========
     println!("=== 6. UPDATE (更新 - Patch 语义) ===");
-    if let Some(mut user) = User::find_by_id(&mut pool, id1).await? {
+    if let Some(mut user) = User::find_by_id(&pool, id1).await? {
         user.email = Some(format!("updated_{}@example.com", timestamp));
         user.system_type = Some(2i16);
-        user.update(&mut pool).await?;
+        user.update(&pool).await?;
         println!("更新成功（Patch 语义：None 字段不更新）\n");
     }
 
     // ========== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ==========
     println!("=== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ===");
-    if let Some(mut user) = User::find_by_id(&mut pool, id1).await? {
+    if let Some(mut user) = User::find_by_id(&pool, id1).await? {
         user.system_type = None;
-        user.update_with_none(&mut pool).await?;
+        user.update_with_none(&pool).await?;
         println!("更新成功（Reset 语义：None 字段重置为默认值）\n");
     }
 
     // ========== 8. FIND_ALL (查询所有记录) ==========
     println!("=== 8. FIND_ALL (查询所有记录) ===");
     let builder = QueryBuilder::new("SELECT * FROM user").order_by("id", false);
-    let all_users = User::find_all(&mut pool, Some(builder)).await?;
+    let all_users = User::find_all(&pool, Some(builder)).await?;
     println!("find_all 返回 {} 条记录\n", all_users.len());
 
     // ========== 9. PAGINATE (分页查询) ==========
     println!("=== 9. PAGINATE (分页查询) ===");
     let builder = QueryBuilder::new("SELECT * FROM user").order_by("id", false);
-    let page = User::paginate(&mut pool, builder, 1, 10).await?;
+    let page = User::paginate(&pool, builder, 1, 10).await?;
     println!(
         "分页结果: 总数={}, 当前页={} 条\n",
         page.total,
@@ -121,11 +121,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 10. SOFT_DELETE (逻辑删除) ==========
     println!("=== 10. SOFT_DELETE (逻辑删除) ===");
-    User::soft_delete_by_id(&mut pool, id2).await?;
+    User::soft_delete_by_id(&pool, id2).await?;
     println!("逻辑删除 ID={} 成功", id2);
 
     // 验证逻辑删除后 find_by_id 返回 None
-    let deleted = User::find_by_id(&mut pool, id2).await?;
+    let deleted = User::find_by_id(&pool, id2).await?;
     if deleted.is_none() {
         println!("验证成功：逻辑删除后 find_by_id 返回 None\n");
     } else {
@@ -134,11 +134,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 11. HARD_DELETE (物理删除) ==========
     println!("=== 11. HARD_DELETE (物理删除) ===");
-    User::hard_delete_by_id(&mut pool, id3).await?;
+    User::hard_delete_by_id(&pool, id3).await?;
     println!("物理删除 ID={} 成功", id3);
 
     // 验证物理删除后记录不存在
-    let deleted = User::find_by_id(&mut pool, id3).await?;
+    let deleted = User::find_by_id(&pool, id3).await?;
     if deleted.is_none() {
         println!("验证成功：物理删除后记录不存在\n");
     } else {
@@ -150,23 +150,23 @@ async fn main() -> anyhow::Result<()> {
 
     // AND 条件
     let builder = QueryBuilder::new("SELECT * FROM user").and_gt("id", 0);
-    let count = User::count(&mut pool, builder).await?;
+    let count = User::count(&pool, builder).await?;
     println!("AND 条件查询: {} 条记录", count);
 
     // LIKE 查询
     let builder = QueryBuilder::new("SELECT * FROM user")
         .and_like("username", &format!("user1_{}", timestamp));
-    let count = User::count(&mut pool, builder).await?;
+    let count = User::count(&pool, builder).await?;
     println!("LIKE 查询: {} 条记录", count);
 
     // IN 查询
     let builder = QueryBuilder::new("SELECT * FROM user").and_in("id", vec![id1, id2]);
-    let count = User::count(&mut pool, builder).await?;
+    let count = User::count(&pool, builder).await?;
     println!("IN 查询: {} 条记录", count);
 
     // BETWEEN 查询
     let builder = QueryBuilder::new("SELECT * FROM user").and_between("id", id1, id3);
-    let count = User::count(&mut pool, builder).await?;
+    let count = User::count(&pool, builder).await?;
     println!("BETWEEN 查询: {} 条记录", count);
 
     println!();

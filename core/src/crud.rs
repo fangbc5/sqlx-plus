@@ -1,6 +1,7 @@
 use crate::db_pool::Result;
 use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
+use crate::utils::escape_identifier;
 use sqlx::Row;
 
 /// 主键 ID 类型
@@ -147,9 +148,100 @@ impl<T> Page<T> {
     }
 }
 
-/// 根据 ID 查找记录
+/// 根据 ID 查找记录 - MySQL 版本
+#[cfg(feature = "mysql")]
+pub async fn find_by_id_mysql<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+) -> Result<Option<M>>
+where
+    M: Model + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow> + Send + Unpin,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::MySql> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::MySql, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::MySql, M::PK);
+    let mut sql_str = format!("SELECT * FROM {} WHERE {} = ?", escaped_table, escaped_pk);
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = escape_identifier(crate::db_pool::DbDriver::MySql, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    match sqlx::query(&sql_str)
+        .bind(id)
+        .fetch_optional(executor)
+        .await?
+    {
+        Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+            crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(e)))
+        })?)),
+        None => Ok(None),
+    }
+}
+
+/// 根据 ID 查找记录 - PostgreSQL 版本
+#[cfg(feature = "postgres")]
+pub async fn find_by_id_postgres<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
+) -> Result<Option<M>>
+where
+    M: Model + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Postgres> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Postgres, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Postgres, M::PK);
+    let mut sql_str = format!("SELECT * FROM {} WHERE {} = $1", escaped_table, escaped_pk);
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field =
+            escape_identifier(crate::db_pool::DbDriver::Postgres, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    match sqlx::query(&sql_str)
+        .bind(id)
+        .fetch_optional(executor)
+        .await?
+    {
+        Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+            crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(e)))
+        })?)),
+        None => Ok(None),
+    }
+}
+
+/// 根据 ID 查找记录 - SQLite 版本
+#[cfg(feature = "sqlite")]
+pub async fn find_by_id_sqlite<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
+) -> Result<Option<M>>
+where
+    M: Model + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Sqlite> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::PK);
+    let mut sql_str = format!("SELECT * FROM {} WHERE {} = ?", escaped_table, escaped_pk);
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = escape_identifier(crate::db_pool::DbDriver::Sqlite, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    match sqlx::query(&sql_str)
+        .bind(id)
+        .fetch_optional(executor)
+        .await?
+    {
+        Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+            crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Decode(Box::new(e)))
+        })?)),
+        None => Ok(None),
+    }
+}
+
+/// 根据 ID 查找记录（统一接口，内部根据数据库类型分发）
 pub async fn find_by_id<M, E>(
-    executor: &mut E,
+    mut executor: E,
     id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
         + for<'q> sqlx::Encode<'q, sqlx::Postgres>
         + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -169,7 +261,6 @@ where
     E: crate::executor::DbExecutor,
 {
     // 构建 SQL，如果指定了逻辑删除字段，自动过滤已删除的记录
-    use crate::utils::escape_identifier;
     let driver = executor.driver();
     let escaped_table = escape_identifier(driver, M::TABLE);
     let escaped_pk = escape_identifier(driver, M::PK);
@@ -273,8 +364,128 @@ where
     }
 }
 
-/// 根据多个 ID 查找记录
-pub async fn find_by_ids<M, I, E>(executor: &mut E, ids: I) -> Result<Vec<M>>
+/// 根据多个 ID 查找记录 - MySQL 版本
+#[cfg(feature = "mysql")]
+pub async fn find_by_ids_mysql<M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
+where
+    M: Model + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow> + Send + Unpin,
+    I: IntoIterator + Send,
+    I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync + Clone,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::MySql> + Send,
+{
+    let ids_vec: Vec<_> = ids.into_iter().collect();
+    if ids_vec.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::MySql, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::MySql, M::PK);
+    let placeholders_str = (0..ids_vec.len())
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut sql_str = format!(
+        "SELECT * FROM {} WHERE {} IN ({})",
+        escaped_table, escaped_pk, placeholders_str
+    );
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = escape_identifier(crate::db_pool::DbDriver::MySql, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    let mut query = sqlx::query_as::<sqlx::MySql, M>(&sql_str);
+    for id in &ids_vec {
+        query = query.bind(id.clone());
+    }
+    query
+        .fetch_all(executor)
+        .await
+        .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+}
+
+/// 根据多个 ID 查找记录 - PostgreSQL 版本
+#[cfg(feature = "postgres")]
+pub async fn find_by_ids_postgres<M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
+where
+    M: Model + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin,
+    I: IntoIterator + Send,
+    I::Item:
+        for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync + Clone,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Postgres> + Send,
+{
+    let ids_vec: Vec<_> = ids.into_iter().collect();
+    if ids_vec.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Postgres, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Postgres, M::PK);
+    let placeholders_str = (1..=ids_vec.len())
+        .map(|i| format!("${}", i))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut sql_str = format!(
+        "SELECT * FROM {} WHERE {} IN ({})",
+        escaped_table, escaped_pk, placeholders_str
+    );
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field =
+            escape_identifier(crate::db_pool::DbDriver::Postgres, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    let mut query = sqlx::query_as::<sqlx::Postgres, M>(&sql_str);
+    for id in &ids_vec {
+        query = query.bind(id.clone());
+    }
+    query
+        .fetch_all(executor)
+        .await
+        .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+}
+
+/// 根据多个 ID 查找记录 - SQLite 版本
+#[cfg(feature = "sqlite")]
+pub async fn find_by_ids_sqlite<M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
+where
+    M: Model + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
+    I: IntoIterator + Send,
+    I::Item:
+        for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync + Clone,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Sqlite> + Send,
+{
+    let ids_vec: Vec<_> = ids.into_iter().collect();
+    if ids_vec.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::PK);
+    let placeholders_str = (0..ids_vec.len())
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut sql_str = format!(
+        "SELECT * FROM {} WHERE {} IN ({})",
+        escaped_table, escaped_pk, placeholders_str
+    );
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = escape_identifier(crate::db_pool::DbDriver::Sqlite, soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    let mut query = sqlx::query_as::<sqlx::Sqlite, M>(&sql_str);
+    for id in &ids_vec {
+        query = query.bind(id.clone());
+    }
+    query
+        .fetch_all(executor)
+        .await
+        .map_err(|e| crate::db_pool::DbPoolError::ConnectionError(e))
+}
+
+/// 根据多个 ID 查找记录（统一接口，内部根据数据库类型分发）
+pub async fn find_by_ids<M, I, E>(mut executor: E, ids: I) -> Result<Vec<M>>
 where
     M: Model
         + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
@@ -396,7 +607,7 @@ where
 }
 
 /// 插入记录（需要由 derive 宏生成具体的 SQL）
-pub async fn insert<M, E>(_model: &M, _executor: &mut E) -> Result<Id>
+pub async fn insert<M, E>(_model: &M, _executor: E) -> Result<Id>
 where
     M: Model,
     E: crate::executor::DbExecutor,
@@ -409,7 +620,7 @@ where
 }
 
 /// 更新记录（需要由 derive 宏生成具体的 SQL）
-pub async fn update<M, E>(_model: &M, _executor: &mut E) -> Result<()>
+pub async fn update<M, E>(_model: &M, _executor: E) -> Result<()>
 where
     M: Model,
     E: crate::executor::DbExecutor,
@@ -425,7 +636,7 @@ where
 ///
 /// 实际 SQL 逻辑由 `derive(CRUD)` 宏生成。此处仅作为占位实现，
 /// 如果用户手动实现 `Crud` 而未提供对应实现，将在运行时报错提示。
-pub async fn update_with_none<M, E>(_model: &M, _executor: &mut E) -> Result<()>
+pub async fn update_with_none<M, E>(_model: &M, _executor: E) -> Result<()>
 where
     M: Model,
     E: crate::executor::DbExecutor,
@@ -437,9 +648,60 @@ where
     ))
 }
 
-/// 根据 ID 物理删除记录
+/// 根据 ID 物理删除记录 - MySQL 版本
+#[cfg(feature = "mysql")]
+pub async fn hard_delete_by_id_mysql<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+) -> Result<()>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::MySql> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::MySql, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::MySql, M::PK);
+    let sql = format!("DELETE FROM {} WHERE {} = ?", escaped_table, escaped_pk);
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
+}
+
+/// 根据 ID 物理删除记录 - PostgreSQL 版本
+#[cfg(feature = "postgres")]
+pub async fn hard_delete_by_id_postgres<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
+) -> Result<()>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Postgres> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Postgres, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Postgres, M::PK);
+    let sql = format!("DELETE FROM {} WHERE {} = $1", escaped_table, escaped_pk);
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
+}
+
+/// 根据 ID 物理删除记录 - SQLite 版本
+#[cfg(feature = "sqlite")]
+pub async fn hard_delete_by_id_sqlite<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
+) -> Result<()>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Sqlite> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::PK);
+    let sql = format!("DELETE FROM {} WHERE {} = ?", escaped_table, escaped_pk);
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
+}
+
+/// 根据 ID 物理删除记录（统一接口，内部根据数据库类型分发）
 pub async fn hard_delete_by_id<M, E>(
-    executor: &mut E,
+    mut executor: E,
     id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
         + for<'q> sqlx::Encode<'q, sqlx::Postgres>
         + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -453,7 +715,6 @@ where
     M: Model,
     E: crate::executor::DbExecutor,
 {
-    use crate::utils::escape_identifier;
     let driver = executor.driver();
     let escaped_table = escape_identifier(driver, M::TABLE);
     let escaped_pk = escape_identifier(driver, M::PK);
@@ -498,9 +759,102 @@ where
     Ok(())
 }
 
-/// 根据 ID 逻辑删除记录（将逻辑删除字段设置为 1）
+/// 根据 ID 逻辑删除记录（将逻辑删除字段设置为 1）- MySQL 版本
+#[cfg(feature = "mysql")]
+pub async fn soft_delete_by_id_mysql<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+) -> Result<()>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::MySql> + Send,
+{
+    let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
+        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Configuration(
+            format!(
+                "Model {} does not have SOFT_DELETE_FIELD defined",
+                std::any::type_name::<M>()
+            )
+            .into(),
+        ))
+    })?;
+
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::MySql, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::MySql, M::PK);
+    let escaped_field = escape_identifier(crate::db_pool::DbDriver::MySql, soft_delete_field);
+    let sql = format!(
+        "UPDATE {} SET {} = 1 WHERE {} = ?",
+        escaped_table, escaped_field, escaped_pk
+    );
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
+}
+
+/// 根据 ID 逻辑删除记录（将逻辑删除字段设置为 1）- PostgreSQL 版本
+#[cfg(feature = "postgres")]
+pub async fn soft_delete_by_id_postgres<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
+) -> Result<()>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Postgres> + Send,
+{
+    let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
+        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Configuration(
+            format!(
+                "Model {} does not have SOFT_DELETE_FIELD defined",
+                std::any::type_name::<M>()
+            )
+            .into(),
+        ))
+    })?;
+
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Postgres, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Postgres, M::PK);
+    let escaped_field = escape_identifier(crate::db_pool::DbDriver::Postgres, soft_delete_field);
+    let sql = format!(
+        "UPDATE {} SET {} = 1 WHERE {} = $1",
+        escaped_table, escaped_field, escaped_pk
+    );
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
+}
+
+/// 根据 ID 逻辑删除记录（将逻辑删除字段设置为 1）- SQLite 版本
+#[cfg(feature = "sqlite")]
+pub async fn soft_delete_by_id_sqlite<M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
+) -> Result<()>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Sqlite> + Send,
+{
+    let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
+        crate::db_pool::DbPoolError::ConnectionError(sqlx::Error::Configuration(
+            format!(
+                "Model {} does not have SOFT_DELETE_FIELD defined",
+                std::any::type_name::<M>()
+            )
+            .into(),
+        ))
+    })?;
+
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::TABLE);
+    let escaped_pk = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::PK);
+    let escaped_field = escape_identifier(crate::db_pool::DbDriver::Sqlite, soft_delete_field);
+    let sql = format!(
+        "UPDATE {} SET {} = 1 WHERE {} = ?",
+        escaped_table, escaped_field, escaped_pk
+    );
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
+}
+
+/// 根据 ID 逻辑删除记录（将逻辑删除字段设置为 1）（统一接口，内部根据数据库类型分发）
 pub async fn soft_delete_by_id<M, E>(
-    executor: &mut E,
+    mut executor: E,
     id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
         + for<'q> sqlx::Encode<'q, sqlx::Postgres>
         + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
@@ -524,7 +878,6 @@ where
         ))
     })?;
 
-    use crate::utils::escape_identifier;
     let driver = executor.driver();
     let escaped_table = escape_identifier(driver, M::TABLE);
     let escaped_pk = escape_identifier(driver, M::PK);
@@ -575,7 +928,7 @@ where
 
 /// 安全查询所有记录（限制最多 1000 条）
 /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-pub async fn find_all<M, E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<M>>
+pub async fn find_all<M, E>(mut executor: E, builder: Option<QueryBuilder>) -> Result<Vec<M>>
 where
     M: Model
         + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
@@ -661,7 +1014,7 @@ where
 /// 查询单条记录（使用 QueryBuilder）
 /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
 /// 自动添加 LIMIT 1 限制
-pub async fn find_one<M, E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<M>>
+pub async fn find_one<M, E>(mut executor: E, builder: QueryBuilder) -> Result<Option<M>>
 where
     M: Model
         + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
@@ -745,7 +1098,7 @@ where
 
 /// 分页查询
 pub async fn paginate<M, E>(
-    executor: &mut E,
+    mut executor: E,
     mut builder: QueryBuilder,
     page: u64,
     size: u64,
@@ -877,9 +1230,85 @@ where
     Ok(Page::new(items, total, page, size))
 }
 
+/// 统计记录数量（使用 QueryBuilder）- MySQL 版本
+#[cfg(feature = "mysql")]
+pub async fn count_mysql<M, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::MySql> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::MySql, M::TABLE);
+    let mut builder = builder;
+    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        builder = builder.and_eq(soft_delete_field, 0);
+    }
+
+    let binds = builder.binds().to_vec();
+    let count_sql = builder.into_count_sql(crate::db_pool::DbDriver::MySql);
+    let mut query = sqlx::query(&count_sql);
+    for bind in &binds {
+        apply_bind_value!(query, bind);
+    }
+    let row = query.fetch_one(executor).await?;
+    Ok(row.get::<i64, _>(0) as u64)
+}
+
+/// 统计记录数量（使用 QueryBuilder）- PostgreSQL 版本
+#[cfg(feature = "postgres")]
+pub async fn count_postgres<M, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Postgres> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Postgres, M::TABLE);
+    let mut builder = builder;
+    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        builder = builder.and_eq(soft_delete_field, 0);
+    }
+
+    let binds = builder.binds().to_vec();
+    let count_sql = builder.into_count_sql(crate::db_pool::DbDriver::Postgres);
+    let mut query = sqlx::query(&count_sql);
+    for bind in &binds {
+        apply_bind_value!(query, bind);
+    }
+    let row = query.fetch_one(executor).await?;
+    Ok(row.get::<i64, _>(0) as u64)
+}
+
+/// 统计记录数量（使用 QueryBuilder）- SQLite 版本
+#[cfg(feature = "sqlite")]
+pub async fn count_sqlite<M, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+where
+    M: Model,
+    E: for<'e> sqlx::Executor<'e, Database = sqlx::Sqlite> + Send,
+{
+    let escaped_table = escape_identifier(crate::db_pool::DbDriver::Sqlite, M::TABLE);
+    let mut builder = builder;
+    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        builder = builder.and_eq(soft_delete_field, 0);
+    }
+
+    let binds = builder.binds().to_vec();
+    let count_sql = builder.into_count_sql(crate::db_pool::DbDriver::Sqlite);
+    let mut query = sqlx::query(&count_sql);
+    for bind in &binds {
+        apply_bind_value!(query, bind);
+    }
+    let row = query.fetch_one(executor).await?;
+    Ok(row.get::<i64, _>(0) as u64)
+}
+
 /// 统计记录数量（使用 QueryBuilder）
 /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-pub async fn count<M, E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
+/// （统一接口，内部根据数据库类型分发）
+pub async fn count<M, E>(mut executor: E, builder: QueryBuilder) -> Result<u64>
 where
     M: Model,
     E: crate::executor::DbExecutor,
@@ -887,7 +1316,6 @@ where
     let driver = executor.driver();
 
     // 统一基础 SQL：始终从模型的表名出发
-    use crate::utils::escape_identifier;
     let escaped_table = escape_identifier(driver, M::TABLE);
     let mut builder = builder;
     builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));

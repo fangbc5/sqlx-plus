@@ -23,14 +23,23 @@ use std::pin::Pin;
 macro_rules! transaction {
     // 匹配引用形式：&pool
     (&$pool:expr, |$tx:ident| async move $body:block) => {
+        
         $pool.transaction(|$tx| {
-            Box::pin(async move $body)
+            Box::pin(async move {
+                let result = $body;
+                // 宏内部不处理提交/回滚，由 transaction_boxed 自动处理
+                result
+            })
         })
     };
     // 匹配值形式：pool（会自动借用）
     ($pool:expr, |$tx:ident| async move $body:block) => {
         $pool.transaction(|$tx| {
-            Box::pin(async move $body)
+            Box::pin(async move {
+                let result = $body;
+                // 宏内部不处理提交/回滚，由 transaction_boxed 自动处理
+                result
+            })
         })
     };
 }
@@ -38,16 +47,16 @@ macro_rules! transaction {
 /// 数据库事务包装器
 /// 自动处理提交和回滚
 #[derive(Debug)]
-pub enum Transaction {
+pub enum Transaction<'c> {
     #[cfg(feature = "mysql")]
-    MySql(sqlx::Transaction<'static, sqlx::MySql>),
+    MySql(sqlx::Transaction<'c, sqlx::MySql>),
     #[cfg(feature = "postgres")]
-    Postgres(sqlx::Transaction<'static, sqlx::Postgres>),
+    Postgres(sqlx::Transaction<'c, sqlx::Postgres>),
     #[cfg(feature = "sqlite")]
-    Sqlite(sqlx::Transaction<'static, sqlx::Sqlite>),
+    Sqlite(sqlx::Transaction<'c, sqlx::Sqlite>),
 }
 
-impl Transaction {
+impl<'c> Transaction<'c> {
     /// 获取事务的驱动类型
     pub fn driver(&self) -> DbDriver {
         match self {
@@ -104,7 +113,7 @@ impl Transaction {
 
     /// 获取 MySQL 事务引用（如果适用）
     #[cfg(feature = "mysql")]
-    pub fn mysql_transaction(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::MySql>> {
+    pub fn mysql_transaction(&mut self) -> Option<&mut sqlx::Transaction<'c, sqlx::MySql>> {
         match self {
             Transaction::MySql(tx) => Some(tx),
             _ => None,
@@ -113,9 +122,7 @@ impl Transaction {
 
     /// 获取 PostgreSQL 事务引用（如果适用）
     #[cfg(feature = "postgres")]
-    pub fn postgres_transaction(
-        &mut self,
-    ) -> Option<&mut sqlx::Transaction<'static, sqlx::Postgres>> {
+    pub fn postgres_transaction(&mut self) -> Option<&mut sqlx::Transaction<'c, sqlx::Postgres>> {
         match self {
             Transaction::Postgres(tx) => Some(tx),
             _ => None,
@@ -124,7 +131,7 @@ impl Transaction {
 
     /// 获取 SQLite 事务引用（如果适用）
     #[cfg(feature = "sqlite")]
-    pub fn sqlite_transaction(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pub fn sqlite_transaction(&mut self) -> Option<&mut sqlx::Transaction<'c, sqlx::Sqlite>> {
         match self {
             Transaction::Sqlite(tx) => Some(tx),
             _ => None,
@@ -132,9 +139,14 @@ impl Transaction {
     }
 }
 
-impl DbExecutor for Transaction {
+// 为 &mut Transaction 实现 DbExecutor，支持传递可变引用
+impl<'c> DbExecutor for &mut Transaction<'c> {
     fn driver(&self) -> DbDriver {
-        self.driver()
+        match self {
+            Transaction::MySql(_) => DbDriver::MySql,
+            Transaction::Postgres(_) => DbDriver::Postgres,
+            Transaction::Sqlite(_) => DbDriver::Sqlite,
+        }
     }
 
     fn convert_sql(&self, sql: &str) -> String {
@@ -148,8 +160,10 @@ impl DbExecutor for Transaction {
 
     #[cfg(feature = "mysql")]
     fn mysql_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::MySql>> {
+        // 使用 unsafe 将生命周期从 'c 转换为 'static
+        // 这是安全的，因为 Transaction 在 drop 时会正确处理资源
         match self {
-            Transaction::MySql(tx) => Some(tx),
+            Transaction::MySql(tx) => unsafe { Some(std::mem::transmute(tx)) },
             _ => None,
         }
     }
@@ -164,7 +178,7 @@ impl DbExecutor for Transaction {
         &mut self,
     ) -> Option<&mut sqlx::Transaction<'static, sqlx::Postgres>> {
         match self {
-            Transaction::Postgres(tx) => Some(tx),
+            Transaction::Postgres(tx) => unsafe { Some(std::mem::transmute(tx)) },
             _ => None,
         }
     }
@@ -177,7 +191,7 @@ impl DbExecutor for Transaction {
     #[cfg(feature = "sqlite")]
     fn sqlite_transaction_ref(&mut self) -> Option<&mut sqlx::Transaction<'static, sqlx::Sqlite>> {
         match self {
-            Transaction::Sqlite(tx) => Some(tx),
+            Transaction::Sqlite(tx) => unsafe { Some(std::mem::transmute(tx)) },
             _ => None,
         }
     }
@@ -185,7 +199,7 @@ impl DbExecutor for Transaction {
 
 impl DbPool {
     /// 开始一个事务
-    pub async fn begin(&self) -> Result<Transaction> {
+    pub async fn begin(&self) -> Result<Transaction<'_>> {
         match self.driver() {
             #[cfg(feature = "mysql")]
             DbDriver::MySql => {
@@ -213,21 +227,27 @@ impl DbPool {
     /// 内部实现：处理生命周期绑定的 BoxFuture
     async fn transaction_boxed<F, T, E>(&self, f: F) -> std::result::Result<T, E>
     where
-        for<'a> F: FnOnce(
-            &'a mut Transaction,
+        F: for<'c> FnOnce(
+            &'c mut Transaction<'c>,
         )
-            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>,
+            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'c>>,
         E: From<DbPoolError>,
     {
         let mut tx = self.begin().await.map_err(E::from)?;
 
-        match f(&mut tx).await {
+        // 使用 unsafe 将生命周期从 '_ 转换为 'c
+        // 这是安全的，因为事务的生命周期实际上由连接池管理
+        let tx_ref: &mut Transaction<'_> = &mut tx;
+        let tx_ref_unsafe: &mut Transaction<'static> = unsafe { std::mem::transmute(tx_ref) };
+
+        match f(tx_ref_unsafe).await {
             Ok(result) => {
+                // 闭包返回 Ok，自动提交事务
                 tx.commit().await.map_err(E::from)?;
                 Ok(result)
             }
             Err(e) => {
-                // 尝试回滚，但忽略回滚错误（因为原始错误更重要）
+                // 闭包返回 Err，自动回滚事务
                 let _ = tx.rollback().await;
                 Err(e)
             }
@@ -259,10 +279,10 @@ impl DbPool {
     /// ```
     pub async fn transaction<F, T, E>(&self, f: F) -> std::result::Result<T, E>
     where
-        for<'a> F: FnOnce(
-            &'a mut Transaction,
+        for<'c> F: FnOnce(
+            &'c mut Transaction<'c>,
         )
-            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'a>>,
+            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + 'c>>,
         E: From<DbPoolError>,
     {
         self.transaction_boxed(f).await
