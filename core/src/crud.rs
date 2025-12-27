@@ -1,6 +1,7 @@
-use crate::error::{SqlxPlusError, Result};
 use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
+use crate::error::{Result, SqlxPlusError};
+use crate::utils::escape_identifier;
 use sqlx::Row;
 
 /// 主键 ID 类型
@@ -84,42 +85,6 @@ where
     query
 }
 
-/// 辅助函数：将绑定值应用到查询中（用于 query，不返回特定类型）
-#[cfg(feature = "mysql")]
-fn apply_binds_to_query_mysql<'q>(
-    mut query: sqlx::query::Query<'q, sqlx::MySql, sqlx::mysql::MySqlArguments>,
-    binds: &'q [BindValue],
-) -> sqlx::query::Query<'q, sqlx::MySql, sqlx::mysql::MySqlArguments> {
-    for bind in binds {
-        apply_bind_value!(query, bind);
-    }
-    query
-}
-
-/// 辅助函数：将绑定值应用到查询中（用于 query，不返回特定类型）
-#[cfg(feature = "postgres")]
-fn apply_binds_to_query_postgres<'q>(
-    mut query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
-    binds: &'q [BindValue],
-) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
-    for bind in binds {
-        apply_bind_value!(query, bind);
-    }
-    query
-}
-
-/// 辅助函数：将绑定值应用到查询中（用于 query，不返回特定类型）
-#[cfg(feature = "sqlite")]
-fn apply_binds_to_query_sqlite<'q>(
-    mut query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
-    binds: &'q [BindValue],
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
-    for bind in binds {
-        apply_bind_value!(query, bind);
-    }
-    query
-}
-
 /// 分页结果
 #[derive(Debug, Clone)]
 pub struct Page<T> {
@@ -147,806 +112,550 @@ impl<T> Page<T> {
     }
 }
 
-/// 根据 ID 查找记录
-pub async fn find_by_id<M, E>(
-    executor: &mut E,
-    id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-        + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-        + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-        + sqlx::Type<sqlx::MySql>
-        + sqlx::Type<sqlx::Postgres>
-        + sqlx::Type<sqlx::Sqlite>
-        + Send
-        + Sync,
-) -> Result<Option<M>>
-where
-    M: Model
-        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
-        + Send
-        + Unpin,
-    E: crate::executor::DbExecutor,
-{
-    // 构建 SQL，如果指定了逻辑删除字段，自动过滤已删除的记录
-    use crate::utils::escape_identifier;
-    let driver = executor.driver();
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let escaped_pk = escape_identifier(driver, M::PK);
-    let mut sql_str = format!("SELECT * FROM {} WHERE {} = ?", escaped_table, escaped_pk);
-    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-        let escaped_field = escape_identifier(driver, soft_delete_field);
-        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
-    }
-    let sql = executor.convert_sql(&sql_str);
+/// 宏：生成数据库特定版本的 find_by_id 函数
+/// 用于减少重复代码，统一处理不同数据库驱动的差异
+macro_rules! impl_find_by_id_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $row_type:ty,
+        $driver:expr,
+        $placeholder:expr,
+        $fn_name:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(
+            executor: E,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
+        ) -> Result<Option<M>>
+        where
+            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let escaped_pk = escape_identifier($driver, M::PK);
+            let mut sql_str = format!("SELECT * FROM {} WHERE {} = {}", escaped_table, escaped_pk, $placeholder);
+            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+                let escaped_field = escape_identifier($driver, soft_delete_field);
+                sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+            }
 
-    match executor.driver() {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                match sqlx::query(&sql)
-                    .bind(id)
-                    .fetch_optional(&mut **tx_ref)
-                    .await?
-                {
-                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
-                            e,
-                        )))
-                    })?)),
-                    None => Ok(None),
-                }
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
-                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
-                            e,
-                        )))
-                    })?)),
-                    None => Ok(None),
-                }
-            } else {
-                Err(SqlxPlusError::NoPoolAvailable)
+            match sqlx::query(&sql_str)
+                .bind(id)
+                .fetch_optional(executor)
+                .await?
+            {
+                Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+                    SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(e)))
+                })?)),
+                None => Ok(None),
             }
         }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                match sqlx::query(&sql)
-                    .bind(id)
-                    .fetch_optional(&mut **tx_ref)
-                    .await?
-                {
-                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
-                            e,
-                        )))
-                    })?)),
-                    None => Ok(None),
-                }
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
-                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
-                            e,
-                        )))
-                    })?)),
-                    None => Ok(None),
-                }
-            } else {
-                Err(SqlxPlusError::NoPoolAvailable)
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                match sqlx::query(&sql)
-                    .bind(id)
-                    .fetch_optional(&mut **tx_ref)
-                    .await?
-                {
-                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
-                            e,
-                        )))
-                    })?)),
-                    None => Ok(None),
-                }
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                match sqlx::query(&sql).bind(id).fetch_optional(pool_ref).await? {
-                    Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                        SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(
-                            e,
-                        )))
-                    })?)),
-                    None => Ok(None),
-                }
-            } else {
-                Err(SqlxPlusError::NoPoolAvailable)
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => Err(SqlxPlusError::NoPoolAvailable),
-    }
+    };
 }
 
-/// 根据多个 ID 查找记录
-pub async fn find_by_ids<M, I, E>(executor: &mut E, ids: I) -> Result<Vec<M>>
-where
-    M: Model
-        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
-        + Send
-        + Unpin,
-    I: IntoIterator + Send,
-    I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
-        + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-        + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-        + sqlx::Type<sqlx::MySql>
-        + sqlx::Type<sqlx::Postgres>
-        + sqlx::Type<sqlx::Sqlite>
-        + Send
-        + Sync
-        + Clone,
-    E: crate::executor::DbExecutor,
-{
-    // 将 IDs 收集到 Vec 中
-    let ids_vec: Vec<_> = ids.into_iter().collect();
+// 使用宏生成不同数据库版本的 find_by_id 函数
+impl_find_by_id_for_db!(
+    "mysql",
+    sqlx::MySql,
+    sqlx::mysql::MySqlRow,
+    crate::db_pool::DbDriver::MySql,
+    "?",
+    find_by_id_mysql
+);
 
-    // 如果 IDs 为空，直接返回空向量
-    if ids_vec.is_empty() {
-        return Ok(Vec::new());
-    }
+impl_find_by_id_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    sqlx::postgres::PgRow,
+    crate::db_pool::DbDriver::Postgres,
+    "$1",
+    find_by_id_postgres
+);
 
-    // 构建 SQL，如果指定了逻辑删除字段，自动过滤已删除的记录
-    use crate::utils::escape_identifier;
-    let driver = executor.driver();
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let escaped_pk = escape_identifier(driver, M::PK);
+impl_find_by_id_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    sqlx::sqlite::SqliteRow,
+    crate::db_pool::DbDriver::Sqlite,
+    "?",
+    find_by_id_sqlite
+);
 
-    // 构建 IN 子句的占位符（使用 ? 占位符，convert_sql 会自动转换为对应数据库格式）
-    let placeholders_str = (0..ids_vec.len())
-        .map(|_| "?")
-        .collect::<Vec<_>>()
-        .join(", ");
 
-    let mut sql_str = format!(
-        "SELECT * FROM {} WHERE {} IN ({})",
-        escaped_table, escaped_pk, placeholders_str
-    );
+/// 宏：生成数据库特定版本的 find_by_ids 函数
+macro_rules! impl_find_by_ids_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $row_type:ty,
+        $driver:expr,
+        $fn_name:ident,
+        $placeholder_gen:expr
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
+        where
+            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
+            I: IntoIterator + Send,
+            I::Item: for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync + Clone,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            let ids_vec: Vec<_> = ids.into_iter().collect();
+            if ids_vec.is_empty() {
+                return Ok(Vec::new());
+            }
 
-    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-        let escaped_field = escape_identifier(driver, soft_delete_field);
-        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
-    }
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let escaped_pk = escape_identifier($driver, M::PK);
+            let placeholders_str = ($placeholder_gen)(ids_vec.len());
+            let mut sql_str = format!(
+                "SELECT * FROM {} WHERE {} IN ({})",
+                escaped_table, escaped_pk, placeholders_str
+            );
+            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+                let escaped_field = escape_identifier($driver, soft_delete_field);
+                sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+            }
 
-    let sql = executor.convert_sql(&sql_str);
-
-    match executor.driver() {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            let mut query = sqlx::query_as::<sqlx::MySql, M>(&sql);
+            let mut query = sqlx::query_as::<$db_type, M>(&sql_str);
             for id in &ids_vec {
                 query = query.bind(id.clone());
             }
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                query
-                    .fetch_all(&mut **tx_ref)
-                    .await
-                    .map_err(|e| SqlxPlusError::DatabaseError(e))
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                query
-                    .fetch_all(pool_ref)
-                    .await
-                    .map_err(|e| SqlxPlusError::DatabaseError(e))
-            } else {
-                Err(SqlxPlusError::NoPoolAvailable)
-            }
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            let mut query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
-            for id in &ids_vec {
-                query = query.bind(id.clone());
-            }
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                query
-                    .fetch_all(&mut **tx_ref)
-                    .await
-                    .map_err(|e| SqlxPlusError::DatabaseError(e))
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                query
-                    .fetch_all(pool_ref)
-                    .await
-                    .map_err(|e| SqlxPlusError::DatabaseError(e))
-            } else {
-                Err(SqlxPlusError::NoPoolAvailable)
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            let mut query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
-            for id in &ids_vec {
-                query = query.bind(id.clone());
-            }
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                query
-                    .fetch_all(&mut **tx_ref)
-                    .await
-                    .map_err(|e| SqlxPlusError::DatabaseError(e))
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                query
-                    .fetch_all(pool_ref)
-                    .await
-                    .map_err(|e| SqlxPlusError::DatabaseError(e))
-            } else {
-                Err(SqlxPlusError::NoPoolAvailable)
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => Err(SqlxPlusError::NoPoolAvailable),
-    }
-}
-
-/// 插入记录（需要由 derive 宏生成具体的 SQL）
-pub async fn insert<M, E>(_model: &M, _executor: &mut E) -> Result<Id>
-where
-    M: Model,
-    E: crate::executor::DbExecutor,
-{
-    // 这个函数应该由 derive(CRUD) 宏生成具体实现
-    // 这里提供一个占位实现
-    Err(SqlxPlusError::DatabaseError(
-        sqlx::Error::Configuration("insert() must be implemented by derive(CRUD) macro".into()),
-    ))
-}
-
-/// 更新记录（需要由 derive 宏生成具体的 SQL）
-pub async fn update<M, E>(_model: &M, _executor: &mut E) -> Result<()>
-where
-    M: Model,
-    E: crate::executor::DbExecutor,
-{
-    // 这个函数应该由 derive(CRUD) 宏生成具体实现
-    // 这里提供一个占位实现
-    Err(SqlxPlusError::DatabaseError(
-        sqlx::Error::Configuration("update() must be implemented by derive(CRUD) macro".into()),
-    ))
-}
-
-/// 更新记录（Reset 语义：Option 字段为 None 时重置为数据库默认值）
-///
-/// 实际 SQL 逻辑由 `derive(CRUD)` 宏生成。此处仅作为占位实现，
-/// 如果用户手动实现 `Crud` 而未提供对应实现，将在运行时报错提示。
-pub async fn update_with_none<M, E>(_model: &M, _executor: &mut E) -> Result<()>
-where
-    M: Model,
-    E: crate::executor::DbExecutor,
-{
-    Err(SqlxPlusError::DatabaseError(
-        sqlx::Error::Configuration(
-            "update_with_none() must be implemented by derive(CRUD) macro".into(),
-        ),
-    ))
-}
-
-/// 根据 ID 物理删除记录
-pub async fn hard_delete_by_id<M, E>(
-    executor: &mut E,
-    id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-        + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-        + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-        + sqlx::Type<sqlx::MySql>
-        + sqlx::Type<sqlx::Postgres>
-        + sqlx::Type<sqlx::Sqlite>
-        + Send
-        + Sync,
-) -> Result<()>
-where
-    M: Model,
-    E: crate::executor::DbExecutor,
-{
-    use crate::utils::escape_identifier;
-    let driver = executor.driver();
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let escaped_pk = escape_identifier(driver, M::PK);
-    let sql_str = format!("DELETE FROM {} WHERE {} = ?", escaped_table, escaped_pk);
-    let sql = executor.convert_sql(&sql_str);
-
-    match executor.driver() {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                sqlx::query(&sql).bind(id).execute(&mut **tx_ref).await?;
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                sqlx::query(&sql).bind(id).execute(pool_ref).await?;
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                sqlx::query(&sql).bind(id).execute(&mut **tx_ref).await?;
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                sqlx::query(&sql).bind(id).execute(pool_ref).await?;
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                sqlx::query(&sql).bind(id).execute(&mut **tx_ref).await?;
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                sqlx::query(&sql).bind(id).execute(pool_ref).await?;
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => return Err(SqlxPlusError::NoPoolAvailable),
-    }
-
-    Ok(())
-}
-
-/// 根据 ID 逻辑删除记录（将逻辑删除字段设置为 1）
-pub async fn soft_delete_by_id<M, E>(
-    executor: &mut E,
-    id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-        + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-        + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-        + sqlx::Type<sqlx::MySql>
-        + sqlx::Type<sqlx::Postgres>
-        + sqlx::Type<sqlx::Sqlite>
-        + Send
-        + Sync,
-) -> Result<()>
-where
-    M: Model,
-    E: crate::executor::DbExecutor,
-{
-    let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
-        SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
-            format!(
-                "Model {} does not have SOFT_DELETE_FIELD defined",
-                std::any::type_name::<M>()
-            )
-            .into(),
-        ))
-    })?;
-
-    use crate::utils::escape_identifier;
-    let driver = executor.driver();
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let escaped_pk = escape_identifier(driver, M::PK);
-    let escaped_field = escape_identifier(driver, soft_delete_field);
-    let sql_str = format!(
-        "UPDATE {} SET {} = 1 WHERE {} = ?",
-        escaped_table, escaped_field, escaped_pk
-    );
-    let sql = executor.convert_sql(&sql_str);
-
-    match executor.driver() {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                sqlx::query(&sql).bind(id).execute(&mut **tx_ref).await?;
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                sqlx::query(&sql).bind(id).execute(pool_ref).await?;
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                sqlx::query(&sql).bind(id).execute(&mut **tx_ref).await?;
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                sqlx::query(&sql).bind(id).execute(pool_ref).await?;
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                sqlx::query(&sql).bind(id).execute(&mut **tx_ref).await?;
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                sqlx::query(&sql).bind(id).execute(pool_ref).await?;
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => return Err(SqlxPlusError::NoPoolAvailable),
-    }
-
-    Ok(())
-}
-
-/// 安全查询所有记录（限制最多 1000 条）
-/// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-pub async fn find_all<M, E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<M>>
-where
-    M: Model
-        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
-        + Send
-        + Unpin,
-    E: crate::executor::DbExecutor,
-{
-    let driver = executor.driver();
-
-    // 构建查询构建器
-    use crate::utils::escape_identifier;
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let mut query_builder =
-        builder.unwrap_or_else(|| QueryBuilder::new(format!("SELECT * FROM {}", escaped_table)));
-    // 无论外部传入的 builder 使用了什么 base_sql，这里统一成基于模型表名的 SQL，保证风格与 find_by_id 一致
-    query_builder = query_builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
-
-    // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
-    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-        query_builder = query_builder.and_eq(soft_delete_field, 0);
-    }
-
-    // 限制最多 1000 条
-    let mut sql = query_builder.into_sql(driver);
-    sql.push_str(" LIMIT 1000");
-
-    let binds = query_builder.binds().to_vec();
-
-    let items: Vec<M> = match driver {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            let query = sqlx::query_as::<sqlx::MySql, M>(&sql);
-            let query = apply_binds_to_query_as_mysql(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                query.fetch_all(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                query.fetch_all(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            let query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
-            let query = apply_binds_to_query_as_postgres(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                query.fetch_all(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                query.fetch_all(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            let query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
-            let query = apply_binds_to_query_as_sqlite(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                query.fetch_all(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                query.fetch_all(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => {
-            return Err(SqlxPlusError::UnsupportedDatabase(format!(
-                "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
-                driver
-            )))
+            query
+                .fetch_all(executor)
+                .await
+                .map_err(|e| SqlxPlusError::DatabaseError(e))
         }
     };
-
-    Ok(items)
 }
 
-/// 查询单条记录（使用 QueryBuilder）
-/// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-/// 自动添加 LIMIT 1 限制
-pub async fn find_one<M, E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<M>>
-where
-    M: Model
-        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
-        + Send
-        + Unpin,
-    E: crate::executor::DbExecutor,
-{
-    let driver = executor.driver();
+// 使用宏生成不同数据库版本的 find_by_ids 函数
+impl_find_by_ids_for_db!(
+    "mysql",
+    sqlx::MySql,
+    sqlx::mysql::MySqlRow,
+    crate::db_pool::DbDriver::MySql,
+    find_by_ids_mysql,
+    |len| (0..len).map(|_| "?").collect::<Vec<_>>().join(", ")
+);
 
-    // 构建查询构建器
-    use crate::utils::escape_identifier;
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let mut query_builder = builder;
-    // 无论外部传入的 builder 使用了什么 base_sql，这里统一成基于模型表名的 SQL
-    query_builder = query_builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+impl_find_by_ids_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    sqlx::postgres::PgRow,
+    crate::db_pool::DbDriver::Postgres,
+    find_by_ids_postgres,
+    |len| (1..=len).map(|i| format!("${}", i)).collect::<Vec<_>>().join(", ")
+);
 
-    // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
-    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-        query_builder = query_builder.and_eq(soft_delete_field, 0);
-    }
+impl_find_by_ids_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    sqlx::sqlite::SqliteRow,
+    crate::db_pool::DbDriver::Sqlite,
+    find_by_ids_sqlite,
+    |len| (0..len).map(|_| "?").collect::<Vec<_>>().join(", ")
+);
 
-    // 自动添加 LIMIT 1
-    let mut sql = query_builder.into_sql(driver);
-    sql.push_str(" LIMIT 1");
 
-    let binds = query_builder.binds().to_vec();
 
-    let result: Option<M> = match driver {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            let query = sqlx::query_as::<sqlx::MySql, M>(&sql);
-            let query = apply_binds_to_query_as_mysql(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                query.fetch_optional(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                query.fetch_optional(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            let query = sqlx::query_as::<sqlx::Postgres, M>(&sql);
-            let query = apply_binds_to_query_as_postgres(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                query.fetch_optional(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                query.fetch_optional(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            let query = sqlx::query_as::<sqlx::Sqlite, M>(&sql);
-            let query = apply_binds_to_query_as_sqlite(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                query.fetch_optional(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                query.fetch_optional(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => {
-            return Err(SqlxPlusError::UnsupportedDatabase(format!(
-                "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
-                driver
-            )))
+/// 宏：生成数据库特定版本的 hard_delete_by_id 函数
+macro_rules! impl_hard_delete_by_id_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $driver:expr,
+        $placeholder:expr,
+        $fn_name:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(
+            executor: E,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
+        ) -> Result<()>
+        where
+            M: Model,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let escaped_pk = escape_identifier($driver, M::PK);
+            let sql = format!("DELETE FROM {} WHERE {} = {}", escaped_table, escaped_pk, $placeholder);
+            sqlx::query(&sql).bind(id).execute(executor).await?;
+            Ok(())
         }
     };
-
-    Ok(result)
 }
 
-/// 分页查询
-pub async fn paginate<M, E>(
-    executor: &mut E,
-    mut builder: QueryBuilder,
-    page: u64,
-    size: u64,
-) -> Result<Page<M>>
-where
-    M: Model
-        + for<'r> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-        + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
-        + Send
-        + Unpin,
-    E: crate::executor::DbExecutor,
-{
-    let driver = executor.driver();
-    let offset = (page - 1) * size;
+// 使用宏生成不同数据库版本的 hard_delete_by_id 函数
+impl_hard_delete_by_id_for_db!(
+    "mysql",
+    sqlx::MySql,
+    crate::db_pool::DbDriver::MySql,
+    "?",
+    hard_delete_by_id_mysql
+);
 
-    // 统一基础 SQL：始终从模型的表名出发，避免各处手写表名风格不一致
-    use crate::utils::escape_identifier;
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+impl_hard_delete_by_id_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    crate::db_pool::DbDriver::Postgres,
+    "$1",
+    hard_delete_by_id_postgres
+);
 
-    // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
-    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-        builder = builder.and_eq(soft_delete_field, 0);
-    }
+impl_hard_delete_by_id_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    crate::db_pool::DbDriver::Sqlite,
+    "?",
+    hard_delete_by_id_sqlite
+);
 
-    let binds = builder.binds().to_vec();
 
-    // 获取总数
-    let count_sql = builder.clone().into_count_sql(driver);
-    let total = match driver {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            let query = sqlx::query(&count_sql);
-            let query = apply_binds_to_query_mysql(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            let row = if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                query.fetch_one(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                query.fetch_one(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            };
-            row.get::<i64, _>(0) as u64
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            let query = sqlx::query(&count_sql);
-            let query = apply_binds_to_query_postgres(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            let row = if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                query.fetch_one(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                query.fetch_one(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            };
-            row.get::<i64, _>(0) as u64
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            let query = sqlx::query(&count_sql);
-            let query = apply_binds_to_query_sqlite(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            let row = if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                query.fetch_one(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                query.fetch_one(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            };
-            row.get::<i64, _>(0) as u64
-        }
-        #[allow(unreachable_patterns)]
-        _ => return Err(SqlxPlusError::NoPoolAvailable),
-    };
+/// 宏：生成数据库特定版本的 soft_delete_by_id 函数
+macro_rules! impl_soft_delete_by_id_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $driver:expr,
+        $placeholder:expr,
+        $fn_name:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(
+            executor: E,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
+        ) -> Result<()>
+        where
+            M: Model,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
+                SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
+                    format!(
+                        "Model {} does not have SOFT_DELETE_FIELD defined",
+                        std::any::type_name::<M>()
+                    )
+                    .into(),
+                ))
+            })?;
 
-    // 获取分页数据
-    let data_sql = builder.clone().into_paginated_sql(driver, size, offset);
-    let items: Vec<M> = match driver {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            let query = sqlx::query_as::<sqlx::MySql, M>(&data_sql);
-            let query = apply_binds_to_query_as_mysql(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                query.fetch_all(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                query.fetch_all(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            let query = sqlx::query_as::<sqlx::Postgres, M>(&data_sql);
-            let query = apply_binds_to_query_as_postgres(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                query.fetch_all(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                query.fetch_all(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            let query = sqlx::query_as::<sqlx::Sqlite, M>(&data_sql);
-            let query = apply_binds_to_query_as_sqlite(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                query.fetch_all(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                query.fetch_all(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            }
-        }
-        #[allow(unreachable_patterns)]
-        _ => {
-            return Err(SqlxPlusError::UnsupportedDatabase(format!(
-                "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
-                driver
-            )))
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let escaped_pk = escape_identifier($driver, M::PK);
+            let escaped_field = escape_identifier($driver, soft_delete_field);
+            let sql = format!(
+                "UPDATE {} SET {} = 1 WHERE {} = {}",
+                escaped_table, escaped_field, escaped_pk, $placeholder
+            );
+            sqlx::query(&sql).bind(id).execute(executor).await?;
+            Ok(())
         }
     };
-
-    Ok(Page::new(items, total, page, size))
 }
 
-/// 统计记录数量（使用 QueryBuilder）
-/// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-pub async fn count<M, E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
-where
-    M: Model,
-    E: crate::executor::DbExecutor,
-{
-    let driver = executor.driver();
+// 使用宏生成不同数据库版本的 soft_delete_by_id 函数
+impl_soft_delete_by_id_for_db!(
+    "mysql",
+    sqlx::MySql,
+    crate::db_pool::DbDriver::MySql,
+    "?",
+    soft_delete_by_id_mysql
+);
 
-    // 统一基础 SQL：始终从模型的表名出发
-    use crate::utils::escape_identifier;
-    let escaped_table = escape_identifier(driver, M::TABLE);
-    let mut builder = builder;
-    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+impl_soft_delete_by_id_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    crate::db_pool::DbDriver::Postgres,
+    "$1",
+    soft_delete_by_id_postgres
+);
 
-    // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
-    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-        builder = builder.and_eq(soft_delete_field, 0);
-    }
+impl_soft_delete_by_id_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    crate::db_pool::DbDriver::Sqlite,
+    "?",
+    soft_delete_by_id_sqlite
+);
 
-    let binds = builder.binds().to_vec();
+/// 宏：生成数据库特定版本的 find_all 函数
+macro_rules! impl_find_all_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $row_type:ty,
+        $driver:expr,
+        $fn_name:ident,
+        $apply_binds_fn:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(
+            executor: E,
+            builder: Option<QueryBuilder>,
+        ) -> Result<Vec<M>>
+        where
+            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            // 构建查询构建器
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let mut query_builder =
+                builder.unwrap_or_else(|| QueryBuilder::new(format!("SELECT * FROM {}", escaped_table)));
+            query_builder = query_builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
 
-    // 获取总数
-    let count_sql = builder.into_count_sql(driver);
-    let total = match driver {
-        #[cfg(feature = "mysql")]
-        crate::db_pool::DbDriver::MySql => {
-            let query = sqlx::query(&count_sql);
-            let query = apply_binds_to_query_mysql(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            let row = if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                query.fetch_one(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.mysql_pool() {
-                query.fetch_one(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            };
-            row.get::<i64, _>(0) as u64
+            // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
+            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+                query_builder = query_builder.and_eq(soft_delete_field, 0);
+            }
+
+            // 限制最多 1000 条
+            let mut sql = query_builder.into_sql($driver);
+            sql.push_str(" LIMIT 1000");
+
+            let binds = query_builder.binds().to_vec();
+            let query = sqlx::query_as::<$db_type, M>(&sql);
+            let query = $apply_binds_fn(query, &binds);
+            query
+                .fetch_all(executor)
+                .await
+                .map_err(|e| SqlxPlusError::DatabaseError(e))
         }
-        #[cfg(feature = "postgres")]
-        crate::db_pool::DbDriver::Postgres => {
-            let query = sqlx::query(&count_sql);
-            let query = apply_binds_to_query_postgres(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            let row = if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                query.fetch_one(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.pg_pool() {
-                query.fetch_one(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            };
-            row.get::<i64, _>(0) as u64
-        }
-        #[cfg(feature = "sqlite")]
-        crate::db_pool::DbDriver::Sqlite => {
-            let query = sqlx::query(&count_sql);
-            let query = apply_binds_to_query_sqlite(query, &binds);
-            // 优先使用事务，获取不到再使用池
-            let row = if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                query.fetch_one(&mut **tx_ref).await?
-            } else if let Some(pool_ref) = executor.sqlite_pool() {
-                query.fetch_one(pool_ref).await?
-            } else {
-                return Err(SqlxPlusError::NoPoolAvailable);
-            };
-            row.get::<i64, _>(0) as u64
-        }
-        #[allow(unreachable_patterns)]
-        _ => return Err(SqlxPlusError::NoPoolAvailable),
     };
-
-    Ok(total)
 }
+
+// 使用宏生成不同数据库版本的 find_all 函数
+impl_find_all_for_db!(
+    "mysql",
+    sqlx::MySql,
+    sqlx::mysql::MySqlRow,
+    crate::db_pool::DbDriver::MySql,
+    find_all_mysql,
+    apply_binds_to_query_as_mysql
+);
+
+impl_find_all_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    sqlx::postgres::PgRow,
+    crate::db_pool::DbDriver::Postgres,
+    find_all_postgres,
+    apply_binds_to_query_as_postgres
+);
+
+impl_find_all_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    sqlx::sqlite::SqliteRow,
+    crate::db_pool::DbDriver::Sqlite,
+    find_all_sqlite,
+    apply_binds_to_query_as_sqlite
+);
+
+/// 宏：生成数据库特定版本的 find_one 函数
+macro_rules! impl_find_one_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $row_type:ty,
+        $driver:expr,
+        $fn_name:ident,
+        $apply_binds_fn:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(
+            executor: E,
+            builder: QueryBuilder,
+        ) -> Result<Option<M>>
+        where
+            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            // 构建查询构建器
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let mut query_builder = builder;
+            query_builder = query_builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+            // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
+            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+                query_builder = query_builder.and_eq(soft_delete_field, 0);
+            }
+
+            // 自动添加 LIMIT 1
+            let mut sql = query_builder.into_sql($driver);
+            sql.push_str(" LIMIT 1");
+
+            let binds = query_builder.binds().to_vec();
+            let query = sqlx::query_as::<$db_type, M>(&sql);
+            let query = $apply_binds_fn(query, &binds);
+            query
+                .fetch_optional(executor)
+                .await
+                .map_err(|e| SqlxPlusError::DatabaseError(e))
+        }
+    };
+}
+
+// 使用宏生成不同数据库版本的 find_one 函数
+impl_find_one_for_db!(
+    "mysql",
+    sqlx::MySql,
+    sqlx::mysql::MySqlRow,
+    crate::db_pool::DbDriver::MySql,
+    find_one_mysql,
+    apply_binds_to_query_as_mysql
+);
+
+impl_find_one_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    sqlx::postgres::PgRow,
+    crate::db_pool::DbDriver::Postgres,
+    find_one_postgres,
+    apply_binds_to_query_as_postgres
+);
+
+impl_find_one_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    sqlx::sqlite::SqliteRow,
+    crate::db_pool::DbDriver::Sqlite,
+    find_one_sqlite,
+    apply_binds_to_query_as_sqlite
+);
+
+/// 宏：生成数据库特定版本的 paginate 函数
+macro_rules! impl_paginate_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $row_type:ty,
+        $driver:expr,
+        $fn_name:ident,
+        $apply_binds_fn:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(
+            executor: E,
+            mut builder: QueryBuilder,
+            page: u64,
+            size: u64,
+        ) -> Result<Page<M>>
+        where
+            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send + Clone,
+        {
+            let offset = (page - 1) * size;
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+                builder = builder.and_eq(soft_delete_field, 0);
+            }
+
+            let binds = builder.binds().to_vec();
+            let count_sql = builder.clone().into_count_sql($driver);
+            let mut count_query = sqlx::query(&count_sql);
+            for bind in &binds {
+                apply_bind_value!(count_query, bind);
+            }
+            let executor_clone = executor.clone();
+            let row = count_query.fetch_one(executor_clone).await?;
+            let total = row.get::<i64, _>(0) as u64;
+
+            let data_sql = builder.clone().into_paginated_sql($driver, size, offset);
+            let query = sqlx::query_as::<$db_type, M>(&data_sql);
+            let query = $apply_binds_fn(query, &binds);
+            let items = query
+                .fetch_all(executor)
+                .await
+                .map_err(|e| SqlxPlusError::DatabaseError(e))?;
+
+            Ok(Page::new(items, total, page, size))
+        }
+    };
+}
+
+// 使用宏生成不同数据库版本的 paginate 函数
+impl_paginate_for_db!(
+    "mysql",
+    sqlx::MySql,
+    sqlx::mysql::MySqlRow,
+    crate::db_pool::DbDriver::MySql,
+    paginate_mysql,
+    apply_binds_to_query_as_mysql
+);
+
+impl_paginate_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    sqlx::postgres::PgRow,
+    crate::db_pool::DbDriver::Postgres,
+    paginate_postgres,
+    apply_binds_to_query_as_postgres
+);
+
+impl_paginate_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    sqlx::sqlite::SqliteRow,
+    crate::db_pool::DbDriver::Sqlite,
+    paginate_sqlite,
+    apply_binds_to_query_as_sqlite
+);
+
+/// 宏：生成数据库特定版本的 count 函数
+macro_rules! impl_count_for_db {
+    (
+        $feature:literal,
+        $db_type:ty,
+        $driver:expr,
+        $fn_name:ident
+    ) => {
+        #[cfg(feature = $feature)]
+        pub async fn $fn_name<M, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+        where
+            M: Model,
+            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+        {
+            let escaped_table = escape_identifier($driver, M::TABLE);
+            let mut builder = builder;
+            builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+                builder = builder.and_eq(soft_delete_field, 0);
+            }
+
+            let binds = builder.binds().to_vec();
+            let count_sql = builder.into_count_sql($driver);
+            let mut query = sqlx::query(&count_sql);
+            for bind in &binds {
+                apply_bind_value!(query, bind);
+            }
+            let row = query.fetch_one(executor).await?;
+            Ok(row.get::<i64, _>(0) as u64)
+        }
+    };
+}
+
+// 使用宏生成不同数据库版本的 count 函数
+impl_count_for_db!(
+    "mysql",
+    sqlx::MySql,
+    crate::db_pool::DbDriver::MySql,
+    count_mysql
+);
+
+impl_count_for_db!(
+    "postgres",
+    sqlx::Postgres,
+    crate::db_pool::DbDriver::Postgres,
+    count_postgres
+);
+
+impl_count_for_db!(
+    "sqlite",
+    sqlx::Sqlite,
+    crate::db_pool::DbDriver::Sqlite,
+    count_sqlite
+);
