@@ -292,9 +292,9 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #[async_trait::async_trait]
         impl sqlxplus::Crud for #name {
-            async fn insert<E>(&self, mut executor: E) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id>
+            async fn insert<E>(&self, executor: &mut E) -> sqlxplus::Result<sqlxplus::crud::Id>
             where
-                E: sqlxplus::executor::DbExecutor + Send,
+                E: sqlxplus::executor::DbExecutor,
             {
                 use sqlxplus::Model;
                 use sqlxplus::utils::escape_identifier;
@@ -354,7 +354,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 .await?;
                             Ok(result.last_insert_id() as i64)
                         } else {
-                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                            Err(sqlxplus::SqlxPlusError::NoPoolAvailable)
                         }
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
@@ -384,7 +384,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 .await?;
                             Ok(id)
                         } else {
-                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                            Err(sqlxplus::SqlxPlusError::NoPoolAvailable)
                         }
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
@@ -410,15 +410,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                                 .await?;
                             Ok(result.last_insert_rowid() as i64)
                         } else {
-                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                            Err(sqlxplus::SqlxPlusError::NoPoolAvailable)
                         }
                     }
                 }
             }
 
-            async fn update<E>(&self, mut executor: E) -> sqlxplus::db_pool::Result<()>
+            async fn update<E>(&self, executor: &mut E) -> sqlxplus::Result<()>
             where
-                E: sqlxplus::executor::DbExecutor + Send,
+                E: sqlxplus::executor::DbExecutor,
             {
                 use sqlxplus::Model;
                 use sqlxplus::utils::escape_identifier;
@@ -478,7 +478,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         } else if let Some(pool_ref) = executor.mysql_pool() {
                             query.execute(pool_ref).await?;
                         } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                            return Err(sqlxplus::SqlxPlusError::NoPoolAvailable);
                         }
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
@@ -499,7 +499,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         } else if let Some(pool_ref) = executor.pg_pool() {
                             query.execute(pool_ref).await?;
                         } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                            return Err(sqlxplus::SqlxPlusError::NoPoolAvailable);
                         }
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
@@ -520,7 +520,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         } else if let Some(pool_ref) = executor.sqlite_pool() {
                             query.execute(pool_ref).await?;
                         } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                            return Err(sqlxplus::SqlxPlusError::NoPoolAvailable);
                         }
                     }
                 }
@@ -533,9 +533,9 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             /// - Option 字段：
             ///   - Some(v)：col = ?
             ///   - None：col = DEFAULT（由数据库决定置空或使用默认值）
-            async fn update_with_none<E>(&self, mut executor: E) -> sqlxplus::db_pool::Result<()>
+            async fn update_with_none<E>(&self, executor: &mut E) -> sqlxplus::Result<()>
             where
-                E: sqlxplus::executor::DbExecutor + Send,
+                E: sqlxplus::executor::DbExecutor,
             {
                 use sqlxplus::Model;
                 use sqlxplus::utils::escape_identifier;
@@ -609,7 +609,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         } else if let Some(pool_ref) = executor.mysql_pool() {
                             query.execute(pool_ref).await?;
                         } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                            return Err(sqlxplus::SqlxPlusError::NoPoolAvailable);
                         }
                     }
                     sqlxplus::db_pool::DbDriver::Postgres => {
@@ -630,7 +630,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         } else if let Some(pool_ref) = executor.pg_pool() {
                             query.execute(pool_ref).await?;
                         } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                            return Err(sqlxplus::SqlxPlusError::NoPoolAvailable);
                         }
                     }
                     sqlxplus::db_pool::DbDriver::Sqlite => {
@@ -651,7 +651,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         } else if let Some(pool_ref) = executor.sqlite_pool() {
                             query.execute(pool_ref).await?;
                         } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
+                            return Err(sqlxplus::SqlxPlusError::NoPoolAvailable);
                         }
                     }
                 }
