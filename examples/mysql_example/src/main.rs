@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "mysql://root:1qaz!QAZ@localhost/test".to_string());
 
     println!("Connecting to MySQL database...");
-    let mut pool = DbPool::connect(&database_url).await?;
+    let pool = DbPool::connect(&database_url).await?;
     println!("Connected successfully!\n");
 
     // 生成唯一的时间戳用于避免重复数据
@@ -266,7 +266,7 @@ async fn main() -> anyhow::Result<()> {
         println!("闭包事务中插入记录，ID: {}", closure_id);
 
         // 在事务中更新记录
-        let mut user_opt = User::find_by_id(tx.as_mysql_executor(), closure_id).await?;
+        let user_opt = User::find_by_id(tx.as_mysql_executor(), closure_id).await?;
         if let Some(mut user) = user_opt {
             user.email = Some(format!("closure_updated_{}@example.com", timestamp));
             user.update(tx.as_mysql_executor()).await?;
@@ -364,7 +364,7 @@ async fn main() -> anyhow::Result<()> {
         println!("插入第二条记录，ID: {}", id2);
 
         // 更新第一条记录
-        let mut u_opt = User::find_by_id(tx.as_mysql_executor(), id1).await?;
+        let u_opt = User::find_by_id(tx.as_mysql_executor(), id1).await?;
         if let Some(mut u) = u_opt {
             u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
             u.update(tx.as_mysql_executor()).await?;

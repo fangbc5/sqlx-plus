@@ -1,6 +1,6 @@
+use crate::error::{Result, SqlxPlusError};
 use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
-use crate::error::{Result, SqlxPlusError};
 use crate::utils::escape_identifier;
 use sqlx::Row;
 
@@ -124,17 +124,20 @@ macro_rules! impl_find_by_id_for_db {
         $fn_name:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(
             executor: E,
             id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<Option<M>>
         where
             M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             let escaped_table = escape_identifier($driver, M::TABLE);
             let escaped_pk = escape_identifier($driver, M::PK);
-            let mut sql_str = format!("SELECT * FROM {} WHERE {} = {}", escaped_table, escaped_pk, $placeholder);
+            let mut sql_str = format!(
+                "SELECT * FROM {} WHERE {} = {}",
+                escaped_table, escaped_pk, $placeholder
+            );
             if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
                 let escaped_field = escape_identifier($driver, soft_delete_field);
                 sql_str.push_str(&format!(" AND {} = 0", escaped_field));
@@ -182,7 +185,6 @@ impl_find_by_id_for_db!(
     find_by_id_sqlite
 );
 
-
 /// 宏：生成数据库特定版本的 find_by_ids 函数
 macro_rules! impl_find_by_ids_for_db {
     (
@@ -194,12 +196,13 @@ macro_rules! impl_find_by_ids_for_db {
         $placeholder_gen:expr
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
+        pub async fn $fn_name<'e, 'c: 'e, M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
         where
             M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
             I: IntoIterator + Send,
-            I::Item: for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync + Clone,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            I::Item:
+                for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync + Clone,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             let ids_vec: Vec<_> = ids.into_iter().collect();
             if ids_vec.is_empty() {
@@ -246,7 +249,10 @@ impl_find_by_ids_for_db!(
     sqlx::postgres::PgRow,
     crate::db_pool::DbDriver::Postgres,
     find_by_ids_postgres,
-    |len| (1..=len).map(|i| format!("${}", i)).collect::<Vec<_>>().join(", ")
+    |len| (1..=len)
+        .map(|i| format!("${}", i))
+        .collect::<Vec<_>>()
+        .join(", ")
 );
 
 impl_find_by_ids_for_db!(
@@ -258,8 +264,6 @@ impl_find_by_ids_for_db!(
     |len| (0..len).map(|_| "?").collect::<Vec<_>>().join(", ")
 );
 
-
-
 /// 宏：生成数据库特定版本的 hard_delete_by_id 函数
 macro_rules! impl_hard_delete_by_id_for_db {
     (
@@ -270,17 +274,20 @@ macro_rules! impl_hard_delete_by_id_for_db {
         $fn_name:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(
             executor: E,
             id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<()>
         where
             M: Model,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             let escaped_table = escape_identifier($driver, M::TABLE);
             let escaped_pk = escape_identifier($driver, M::PK);
-            let sql = format!("DELETE FROM {} WHERE {} = {}", escaped_table, escaped_pk, $placeholder);
+            let sql = format!(
+                "DELETE FROM {} WHERE {} = {}",
+                escaped_table, escaped_pk, $placeholder
+            );
             sqlx::query(&sql).bind(id).execute(executor).await?;
             Ok(())
         }
@@ -312,7 +319,6 @@ impl_hard_delete_by_id_for_db!(
     hard_delete_by_id_sqlite
 );
 
-
 /// 宏：生成数据库特定版本的 soft_delete_by_id 函数
 macro_rules! impl_soft_delete_by_id_for_db {
     (
@@ -323,13 +329,13 @@ macro_rules! impl_soft_delete_by_id_for_db {
         $fn_name:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(
             executor: E,
             id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<()>
         where
             M: Model,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
                 SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
@@ -390,18 +396,18 @@ macro_rules! impl_find_all_for_db {
         $apply_binds_fn:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(
             executor: E,
             builder: Option<QueryBuilder>,
         ) -> Result<Vec<M>>
         where
             M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             // 构建查询构建器
             let escaped_table = escape_identifier($driver, M::TABLE);
-            let mut query_builder =
-                builder.unwrap_or_else(|| QueryBuilder::new(format!("SELECT * FROM {}", escaped_table)));
+            let mut query_builder = builder
+                .unwrap_or_else(|| QueryBuilder::new(format!("SELECT * FROM {}", escaped_table)));
             query_builder = query_builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
 
             // 如果指定了逻辑删除字段，自动添加过滤条件（只查询未删除的记录）
@@ -463,13 +469,13 @@ macro_rules! impl_find_one_for_db {
         $apply_binds_fn:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(
             executor: E,
             builder: QueryBuilder,
         ) -> Result<Option<M>>
         where
             M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             // 构建查询构建器
             let escaped_table = escape_identifier($driver, M::TABLE);
@@ -535,7 +541,7 @@ macro_rules! impl_paginate_for_db {
         $apply_binds_fn:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(
             executor: E,
             mut builder: QueryBuilder,
             page: u64,
@@ -543,7 +549,7 @@ macro_rules! impl_paginate_for_db {
         ) -> Result<Page<M>>
         where
             M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send + Clone,
+            E: sqlx::Executor<'c, Database = $db_type> + Send + Clone,
         {
             let offset = (page - 1) * size;
             let escaped_table = escape_identifier($driver, M::TABLE);
@@ -613,10 +619,10 @@ macro_rules! impl_count_for_db {
         $fn_name:ident
     ) => {
         #[cfg(feature = $feature)]
-        pub async fn $fn_name<M, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+        pub async fn $fn_name<'e, 'c: 'e, M, E>(executor: E, builder: QueryBuilder) -> Result<u64>
         where
             M: Model,
-            E: for<'e> sqlx::Executor<'e, Database = $db_type> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             let escaped_table = escape_identifier($driver, M::TABLE);
             let mut builder = builder;
