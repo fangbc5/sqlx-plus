@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "sqlite:/Volumes/fangbc/sqlitedb/test.db".to_string());
 
     println!("Connecting to SQLite database...");
-    let mut pool = DbPool::connect(&database_url).await?;
+    let pool = DbPool::connect(&database_url).await?;
     println!("Connected successfully!\n");
 
     // 生成唯一的时间戳用于避免重复数据
@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id1 = user1.insert(&mut pool).await?;
+    let id1 = user1.insert_sqlite(pool.sqlite_pool().unwrap()).await?;
     println!("插入成功，ID: {}\n", id1);
 
     let user2 = User {
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id2 = user2.insert(&mut pool).await?;
+    let id2 = user2.insert_sqlite(pool.sqlite_pool().unwrap()).await?;
     println!("插入成功，ID: {}\n", id2);
 
     let user3 = User {
@@ -49,12 +49,12 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id3 = user3.insert(&mut pool).await?;
+    let id3 = user3.insert_sqlite(pool.sqlite_pool().unwrap()).await?;
     println!("插入成功，ID: {}\n", id3);
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
     println!("=== 2. FIND_BY_ID (根据 ID 查找) ===");
-    let found = User::find_by_id(&mut pool, id1).await?;
+    let found = User::find_by_id(pool.sqlite_pool().unwrap(), id1).await?;
     println!(
         "找到用户: {:?}\n",
         found.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 3. FIND_BY_IDS (根据多个 ID 查找) ==========
     println!("=== 3. FIND_BY_IDS (根据多个 ID 查找) ===");
-    let users = User::find_by_ids(&mut pool, vec![id1, id2, id3]).await?;
+    let users = User::find_by_ids(pool.sqlite_pool().unwrap(), vec![id1, id2, id3]).await?;
     println!("找到 {} 条记录:", users.len());
     for user in &users {
         println!("  ID={:?}, username={:?}", user.id, user.username);
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let builder = QueryBuilder::new("SELECT * FROM user")
         .and_eq("id", id1)
         .order_by("id", false);
-    let one_user = User::find_one(&mut pool, builder).await?;
+    let one_user = User::find_one(pool.sqlite_pool().unwrap(), builder).await?;
     println!(
         "find_one 结果: {:?}\n",
         one_user.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
     // ========== 5. COUNT (统计记录数量) ==========
     println!("=== 5. COUNT (统计记录数量) ===");
     let builder = QueryBuilder::new("SELECT * FROM user");
-    let total = User::count(&mut pool, builder).await?;
+    let total = User::count(pool.sqlite_pool().unwrap(), builder).await?;
     println!("未删除的记录数: {}\n", total);
 
     // ========== 6. UPDATE (更新 - Patch 语义) ==========

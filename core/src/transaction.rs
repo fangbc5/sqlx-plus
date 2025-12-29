@@ -146,6 +146,7 @@ where
     }
 }
 
+#[cfg(feature = "mysql")]
 pub async fn with_nested_transaction<F, T>(
     tx: &mut Transaction<'_>,
     f: F,

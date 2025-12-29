@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id1 = user1.insert(pool.mysql_pool().unwrap()).await?;
+    let id1 = user1.insert_mysql(pool.mysql_pool().unwrap()).await?;
     println!("插入成功，ID: {}\n", id1);
 
     let user2 = User {
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id2 = user2.insert(pool.mysql_pool().unwrap()).await?;
+    let id2 = user2.insert_mysql(pool.mysql_pool().unwrap()).await?;
     println!("插入成功，ID: {}\n", id2);
 
     let user3 = User {
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id3 = user3.insert(pool.mysql_pool().unwrap()).await?;
+    let id3 = user3.insert_mysql(pool.mysql_pool().unwrap()).await?;
     println!("插入成功，ID: {}\n", id3);
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(mut user) = User::find_by_id(pool.mysql_pool().unwrap(), id1).await? {
         user.email = Some(format!("updated_{}@example.com", timestamp));
         user.system_type = Some(2i16);
-        user.update(pool.mysql_pool().unwrap()).await?;
+        user.update_mysql(pool.mysql_pool().unwrap()).await?;
         println!("更新成功（Patch 语义：None 字段不更新）\n");
     }
 
@@ -99,7 +99,8 @@ async fn main() -> anyhow::Result<()> {
     println!("=== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ===");
     if let Some(mut user) = User::find_by_id(pool.mysql_pool().unwrap(), id1).await? {
         user.system_type = None;
-        user.update_with_none(pool.mysql_pool().unwrap()).await?;
+        user.update_with_none_mysql(pool.mysql_pool().unwrap())
+            .await?;
         println!("更新成功（Reset 语义：None 字段重置为默认值）\n");
     }
 
@@ -185,13 +186,13 @@ async fn main() -> anyhow::Result<()> {
             is_del: Some(0i16),
             ..Default::default()
         };
-        let tx_id1 = tx_user1.insert(tx.as_mysql_executor()).await?;
+        let tx_id1 = tx_user1.insert_mysql(tx.as_mysql_executor()).await?;
         println!("事务中插入记录，ID: {}", tx_id1);
 
         // 在事务中更新记录
         if let Some(mut user) = User::find_by_id(tx.as_mysql_executor(), tx_id1).await? {
             user.email = Some(format!("tx_updated_{}@example.com", timestamp));
-            user.update(tx.as_mysql_executor()).await?;
+            user.update_mysql(tx.as_mysql_executor()).await?;
             println!("事务中更新记录成功");
         }
 
@@ -225,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
             is_del: Some(0i16),
             ..Default::default()
         };
-        let tx_id2 = tx_user2.insert(tx.as_mysql_executor()).await?;
+        let tx_id2 = tx_user2.insert_mysql(tx.as_mysql_executor()).await?;
         println!("事务中插入记录，ID: {}", tx_id2);
 
         // 在事务中查询记录（应该能查到）
@@ -252,38 +253,37 @@ async fn main() -> anyhow::Result<()> {
     println!("=== 15. TRANSACTION - 闭包事务（成功提交） ===");
     let closure_id = sqlxplus::with_transaction(&pool, |tx| {
         Box::pin(async move {
-        println!("闭包事务开始");
+            println!("闭包事务开始");
 
-        // 在事务中插入记录
-        let closure_user = User {
-            id: None,
-            username: Some(format!("closure_user_{}", timestamp)),
-            email: Some(format!("closure_user_{}@example.com", timestamp)),
-            is_del: Some(0i16),
-            ..Default::default()
-        };
-        let closure_id = closure_user.insert(tx.as_mysql_executor()).await?;
-        println!("闭包事务中插入记录，ID: {}", closure_id);
+            // 在事务中插入记录
+            let closure_user = User {
+                id: None,
+                username: Some(format!("closure_user_{}", timestamp)),
+                email: Some(format!("closure_user_{}@example.com", timestamp)),
+                is_del: Some(0i16),
+                ..Default::default()
+            };
+            let closure_id = closure_user.insert_mysql(tx.as_mysql_executor()).await?;
+            println!("闭包事务中插入记录，ID: {}", closure_id);
 
-        // 在事务中更新记录
-        let user_opt = User::find_by_id(tx.as_mysql_executor(), closure_id).await?;
-        if let Some(mut user) = user_opt {
-            user.email = Some(format!("closure_updated_{}@example.com", timestamp));
-            user.update(tx.as_mysql_executor()).await?;
-            println!("闭包事务中更新记录成功");
-        }
+            // 在事务中更新记录
+            let user_opt = User::find_by_id(tx.as_mysql_executor(), closure_id).await?;
+            if let Some(mut user) = user_opt {
+                user.email = Some(format!("closure_updated_{}@example.com", timestamp));
+                user.update_mysql(tx.as_mysql_executor()).await?;
+                println!("闭包事务中更新记录成功");
+            }
 
-        // 在事务中查询记录
-        let count_builder = QueryBuilder::new("SELECT * FROM user").and_eq("id", closure_id);
-        let count = {
-            User::count(tx.as_mysql_executor(), count_builder).await?
-        };
-        println!("闭包事务中查询记录数: {}", count);
+            // 在事务中查询记录
+            let count_builder = QueryBuilder::new("SELECT * FROM user").and_eq("id", closure_id);
+            let count = { User::count(tx.as_mysql_executor(), count_builder).await? };
+            println!("闭包事务中查询记录数: {}", count);
 
-        // 返回成功，事务会自动提交
-        Ok::<i64, sqlxplus::SqlxPlusError>(closure_id)
+            // 返回成功，事务会自动提交
+            Ok::<i64, sqlxplus::SqlxPlusError>(closure_id)
         })
-    }).await?;
+    })
+    .await?;
     println!("闭包事务提交成功，返回 ID: {}", closure_id);
 
     // 验证闭包事务提交后的数据
@@ -302,31 +302,32 @@ async fn main() -> anyhow::Result<()> {
     let rollback_result: Result<i64, sqlxplus::SqlxPlusError> =
         sqlxplus::with_transaction(&pool, |tx| {
             Box::pin(async move {
-            println!("闭包事务开始（将回滚）");
+                println!("闭包事务开始（将回滚）");
 
-            // 在事务中插入记录
-            let rollback_user = User {
-                id: None,
-                username: Some(format!("rollback_user_{}", timestamp)),
-                email: Some(format!("rollback_user_{}@example.com", timestamp)),
-                is_del: Some(0i16),
-                ..Default::default()
-            };
-            let rollback_id = rollback_user.insert(tx.as_mysql_executor()).await?;
-            println!("闭包事务中插入记录，ID: {}", rollback_id);
+                // 在事务中插入记录
+                let rollback_user = User {
+                    id: None,
+                    username: Some(format!("rollback_user_{}", timestamp)),
+                    email: Some(format!("rollback_user_{}@example.com", timestamp)),
+                    is_del: Some(0i16),
+                    ..Default::default()
+                };
+                let rollback_id = rollback_user.insert_mysql(tx.as_mysql_executor()).await?;
+                println!("闭包事务中插入记录，ID: {}", rollback_id);
 
-            // 在事务中查询记录（应该能查到）
-            let tx_user = User::find_by_id(tx.as_mysql_executor(), rollback_id).await?;
-            if tx_user.is_some() {
-                println!("闭包事务中可以查询到记录");
-            }
+                // 在事务中查询记录（应该能查到）
+                let tx_user = User::find_by_id(tx.as_mysql_executor(), rollback_id).await?;
+                if tx_user.is_some() {
+                    println!("闭包事务中可以查询到记录");
+                }
 
-            // 返回错误，事务会自动回滚
-            Err(sqlxplus::SqlxPlusError::DatabaseError(
-                sqlx::Error::Configuration("模拟错误，触发回滚".into())
-            ))
+                // 返回错误，事务会自动回滚
+                Err(sqlxplus::SqlxPlusError::DatabaseError(
+                    sqlx::Error::Configuration("模拟错误，触发回滚".into()),
+                ))
             })
-        }).await;
+        })
+        .await;
 
     if rollback_result.is_err() {
         println!("闭包事务回滚成功（返回错误）");
@@ -339,52 +340,53 @@ async fn main() -> anyhow::Result<()> {
     println!("=== 17. TRANSACTION - 复杂事务场景（多个操作） ===");
     let (complex_id1, complex_id2) = sqlxplus::with_transaction(&pool, |tx| {
         Box::pin(async move {
-        println!("复杂事务开始");
+            println!("复杂事务开始");
 
-        // 插入第一条记录
-        let user1 = User {
-            id: None,
-            username: Some(format!("complex1_{}", timestamp)),
-            email: Some(format!("complex1_{}@example.com", timestamp)),
-            is_del: Some(0i16),
-            ..Default::default()
-        };
-        let id1 = user1.insert(tx.as_mysql_executor()).await?;
-        println!("插入第一条记录，ID: {}", id1);
+            // 插入第一条记录
+            let user1 = User {
+                id: None,
+                username: Some(format!("complex1_{}", timestamp)),
+                email: Some(format!("complex1_{}@example.com", timestamp)),
+                is_del: Some(0i16),
+                ..Default::default()
+            };
+            let id1 = user1.insert_mysql(tx.as_mysql_executor()).await?;
+            println!("插入第一条记录，ID: {}", id1);
 
-        // 插入第二条记录
-        let user2 = User {
-            id: None,
-            username: Some(format!("complex2_{}", timestamp)),
-            email: Some(format!("complex2_{}@example.com", timestamp)),
-            is_del: Some(0i16),
-            ..Default::default()
-        };
-        let id2 = user2.insert(tx.as_mysql_executor()).await?;
-        println!("插入第二条记录，ID: {}", id2);
+            // 插入第二条记录
+            let user2 = User {
+                id: None,
+                username: Some(format!("complex2_{}", timestamp)),
+                email: Some(format!("complex2_{}@example.com", timestamp)),
+                is_del: Some(0i16),
+                ..Default::default()
+            };
+            let id2 = user2.insert_mysql(tx.as_mysql_executor()).await?;
+            println!("插入第二条记录，ID: {}", id2);
 
-        // 更新第一条记录
-        let u_opt = User::find_by_id(tx.as_mysql_executor(), id1).await?;
-        if let Some(mut u) = u_opt {
-            u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
-            u.update(tx.as_mysql_executor()).await?;
-            println!("更新第一条记录成功");
-        }
+            // 更新第一条记录
+            let u_opt = User::find_by_id(tx.as_mysql_executor(), id1).await?;
+            if let Some(mut u) = u_opt {
+                u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
+                u.update_mysql(tx.as_mysql_executor()).await?;
+                println!("更新第一条记录成功");
+            }
 
-        // 查询多条记录
-        let ids = vec![id1, id2];
-        let users = User::find_by_ids(tx.as_mysql_executor(), ids).await?;
-        println!("查询到 {} 条记录", users.len());
+            // 查询多条记录
+            let ids = vec![id1, id2];
+            let users = User::find_by_ids(tx.as_mysql_executor(), ids).await?;
+            println!("查询到 {} 条记录", users.len());
 
-        // 统计记录数
-        let builder = QueryBuilder::new("SELECT * FROM user").and_in("id", vec![id1, id2]);
-        let count = User::count(tx.as_mysql_executor(), builder).await?;
-        println!("统计记录数: {}", count);
+            // 统计记录数
+            let builder = QueryBuilder::new("SELECT * FROM user").and_in("id", vec![id1, id2]);
+            let count = User::count(tx.as_mysql_executor(), builder).await?;
+            println!("统计记录数: {}", count);
 
-        // 返回两个 ID
-        Ok::<(i64, i64), sqlxplus::SqlxPlusError>((id1, id2))
+            // 返回两个 ID
+            Ok::<(i64, i64), sqlxplus::SqlxPlusError>((id1, id2))
         })
-    }).await?;
+    })
+    .await?;
     println!(
         "复杂事务提交成功，返回 ID1: {}, ID2: {}\n",
         complex_id1, complex_id2

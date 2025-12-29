@@ -149,7 +149,9 @@ macro_rules! impl_find_by_id_for_db {
                 .await?
             {
                 Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                    SqlxPlusError::DatabaseError(sqlx::Error::Decode(Box::new(e)))
+                    SqlxPlusError::DatabaseError(sqlx::Error::Decode(
+                        Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>
+                    ))
                 })?)),
                 None => Ok(None),
             }

@@ -290,6 +290,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
     // 生成实现代码
     let expanded = quote! {
+        // Trait 方法实现
         #[async_trait::async_trait]
         impl sqlxplus::Crud for #name {
             // MySQL 版本的 insert
@@ -620,13 +621,6 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 Ok(())
             }
 
-            /// 更新记录（包含 Option 字段为 None 的重置）
-            ///
-            /// - 非 Option 字段：始终参与更新（col = ?）
-            /// - Option 字段：
-            ///   - Some(v)：col = ?
-            ///   - None：col = DEFAULT（由数据库决定置空或使用默认值）
-
             // MySQL 版本的 update_with_none
             #[cfg(feature = "mysql")]
             async fn update_with_none_mysql<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
@@ -800,79 +794,6 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
-            }
-
-            // 实现 trait 方法，根据数据库类型调用对应的数据库特定方法
-            #[cfg(feature = "mysql")]
-            async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
-            {
-                self.insert_mysql(executor).await
-            }
-
-            #[cfg(feature = "postgres")]
-            async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-            {
-                self.insert_postgres(executor).await
-            }
-
-            #[cfg(feature = "sqlite")]
-            async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-            {
-                self.insert_sqlite(executor).await
-            }
-
-            #[cfg(feature = "mysql")]
-            async fn update<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
-            {
-                self.update_mysql(executor).await
-            }
-
-            #[cfg(feature = "postgres")]
-            async fn update<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-            {
-                self.update_postgres(executor).await
-            }
-
-            #[cfg(feature = "sqlite")]
-            async fn update<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-            {
-                self.update_sqlite(executor).await
-            }
-
-            #[cfg(feature = "mysql")]
-            async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
-            {
-                self.update_with_none_mysql(executor).await
-            }
-
-            #[cfg(feature = "postgres")]
-            async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-            {
-                self.update_with_none_postgres(executor).await
-            }
-
-            #[cfg(feature = "sqlite")]
-            async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
-            where
-                E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-            {
-                self.update_with_none_sqlite(executor).await
             }
         }
     };

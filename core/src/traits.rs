@@ -6,318 +6,126 @@ use crate::query_builder::QueryBuilder;
 pub type Id = i64;
 
 /// 宏：为 Crud trait 生成 find_by_id 方法
-/// 使用优先级条件编译：mysql > postgres > sqlite
 macro_rules! impl_find_by_id {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn find_by_id<'e, 'c: 'e, E>(
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(
             executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<Option<Self>>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::find_by_id_mysql(executor, id).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn find_by_id<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
-        ) -> Result<Option<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::find_by_id_postgres(executor, id).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn find_by_id<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
-        ) -> Result<Option<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::find_by_id_sqlite(executor, id).await
+            crate::crud::$crud_fn(executor, id).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 find_by_ids 方法
 macro_rules! impl_find_by_ids {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn find_by_ids<'e, 'c: 'e, I, E>(executor: E, ids: I) -> Result<Vec<Self>>
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, I, E>(executor: E, ids: I) -> Result<Vec<Self>>
         where
             I: IntoIterator + Send,
-            I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
-                + sqlx::Type<sqlx::MySql>
-                + Send
-                + Sync
-                + Clone,
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            I::Item:
+                for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync + Clone,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::find_by_ids_mysql(executor, ids).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn find_by_ids<'e, 'c: 'e, I, E>(executor: E, ids: I) -> Result<Vec<Self>>
-        where
-            I: IntoIterator + Send,
-            I::Item: for<'q> sqlx::Encode<'q, sqlx::Postgres>
-                + sqlx::Type<sqlx::Postgres>
-                + Send
-                + Sync
-                + Clone,
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::find_by_ids_postgres(executor, ids).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn find_by_ids<'e, 'c: 'e, I, E>(executor: E, ids: I) -> Result<Vec<Self>>
-        where
-            I: IntoIterator + Send,
-            I::Item: for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-                + sqlx::Type<sqlx::Sqlite>
-                + Send
-                + Sync
-                + Clone,
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::find_by_ids_sqlite(executor, ids).await
+            crate::crud::$crud_fn(executor, ids).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 find_all 方法
 macro_rules! impl_find_all {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn find_all<'e, 'c: 'e, E>(
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(
             executor: E,
             builder: Option<QueryBuilder>,
         ) -> Result<Vec<Self>>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::find_all_mysql(executor, builder).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn find_all<E>(executor: E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::find_all_postgres(executor, builder).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn find_all<E>(executor: E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::find_all_sqlite(executor, builder).await
+            crate::crud::$crud_fn(executor, builder).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 find_one 方法
 macro_rules! impl_find_one {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn find_one<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::find_one_mysql(executor, builder).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn find_one<E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::find_one_postgres(executor, builder).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn find_one<E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::find_one_sqlite(executor, builder).await
+            crate::crud::$crud_fn(executor, builder).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 count 方法
 macro_rules! impl_count {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn count<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<u64>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::count_mysql::<Self, E>(executor, builder).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn count<E>(executor: E, builder: QueryBuilder) -> Result<u64>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::count_postgres::<Self, E>(executor, builder).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn count<E>(executor: E, builder: QueryBuilder) -> Result<u64>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::count_sqlite::<Self, E>(executor, builder).await
+            crate::crud::$crud_fn::<Self, E>(executor, builder).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 hard_delete_by_id 方法
 macro_rules! impl_hard_delete_by_id {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn hard_delete_by_id<'e, 'c: 'e, E>(
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(
             executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<()>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::hard_delete_by_id_mysql::<Self, E>(executor, id).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn hard_delete_by_id<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
-        ) -> Result<()>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::hard_delete_by_id_postgres::<Self, E>(executor, id).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn hard_delete_by_id<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
-        ) -> Result<()>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::hard_delete_by_id_sqlite::<Self, E>(executor, id).await
+            crate::crud::$crud_fn::<Self, E>(executor, id).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 soft_delete_by_id 方法
 macro_rules! impl_soft_delete_by_id {
-    (mysql, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = "mysql")]
-        async fn soft_delete_by_id<'e, 'c: 'e, E>(
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(
             executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<()>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
-            crate::crud::soft_delete_by_id_mysql::<Self, E>(executor, id).await
-        }
-    };
-    (postgres, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn soft_delete_by_id<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
-        ) -> Result<()>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            crate::crud::soft_delete_by_id_postgres::<Self, E>(executor, id).await
-        }
-    };
-    (sqlite, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn soft_delete_by_id<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
-        ) -> Result<()>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            crate::crud::soft_delete_by_id_sqlite::<Self, E>(executor, id).await
+            crate::crud::$crud_fn::<Self, E>(executor, id).await
         }
     };
 }
 
 /// 宏：为 Crud trait 生成 delete_by_id 方法
 macro_rules! impl_delete_by_id {
-    (mysql, $db_type:ty) => {
-        #[cfg(feature = "mysql")]
-        async fn delete_by_id<'e, 'c: 'e, E>(
+    ($feature:literal, $db_type:ty, $crud_fn:ident, $soft_fn:ident, $hard_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(
             executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::MySql> + sqlx::Type<sqlx::MySql> + Send + Sync,
+            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
         ) -> Result<()>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
+            E: sqlx::Executor<'c, Database = $db_type> + Send,
         {
             if Self::SOFT_DELETE_FIELD.is_some() {
-                Self::soft_delete_by_id(executor, id).await
+                Self::$soft_fn(executor, id).await
             } else {
-                Self::hard_delete_by_id(executor, id).await
-            }
-        }
-    };
-    (postgres, $db_type:ty) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn delete_by_id<E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Sync,
-        ) -> Result<()>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
-        {
-            if Self::SOFT_DELETE_FIELD.is_some() {
-                Self::soft_delete_by_id(executor, id).await
-            } else {
-                Self::hard_delete_by_id(executor, id).await
-            }
-        }
-    };
-    (sqlite, $db_type:ty) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn delete_by_id<E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Sync,
-        ) -> Result<()>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
-        {
-            if Self::SOFT_DELETE_FIELD.is_some() {
-                Self::soft_delete_by_id(executor, id).await
-            } else {
-                Self::hard_delete_by_id(executor, id).await
+                Self::$hard_fn(executor, id).await
             }
         }
     };
@@ -325,46 +133,18 @@ macro_rules! impl_delete_by_id {
 
 /// 宏：为 Crud trait 生成 paginate 方法
 macro_rules! impl_paginate {
-    (mysql, $db_type:ty) => {
-        #[cfg(feature = "mysql")]
-        async fn paginate<'e, 'c: 'e, E>(
+    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
+        #[cfg(feature = $feature)]
+        async fn $crud_fn<'e, 'c: 'e, E>(
             executor: E,
             builder: QueryBuilder,
             page: u64,
             size: u64,
         ) -> Result<Page<Self>>
         where
-            E: sqlx::Executor<'c, Database = sqlx::MySql> + Send + Clone,
+            E: sqlx::Executor<'c, Database = $db_type> + Send + Clone,
         {
-            crate::crud::paginate_mysql::<Self, E>(executor, builder, page, size).await
-        }
-    };
-    (postgres, $db_type:ty) => {
-        #[cfg(all(feature = "postgres", not(feature = "mysql")))]
-        async fn paginate<E>(
-            executor: E,
-            builder: QueryBuilder,
-            page: u64,
-            size: u64,
-        ) -> Result<Page<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send + Clone,
-        {
-            crate::crud::paginate_postgres::<Self, E>(executor, builder, page, size).await
-        }
-    };
-    (sqlite, $db_type:ty) => {
-        #[cfg(all(feature = "sqlite", not(any(feature = "mysql", feature = "postgres"))))]
-        async fn paginate<E>(
-            executor: E,
-            builder: QueryBuilder,
-            page: u64,
-            size: u64,
-        ) -> Result<Page<Self>>
-        where
-            E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send + Clone,
-        {
-            crate::crud::paginate_sqlite::<Self, E>(executor, builder, page, size).await
+            crate::crud::$crud_fn::<Self, E>(executor, builder, page, size).await
         }
     };
 }
@@ -397,11 +177,26 @@ pub trait Crud:
     + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
     + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
 {
-    /// 插入记录
+    /// 插入记录（MySQL）
     /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
+    #[cfg(feature = "mysql")]
+    async fn insert_mysql<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
     where
-        E: sqlx::Executor<'c> + Send;
+        E: sqlx::Executor<'c, Database = sqlx::MySql> + Send;
+
+    /// 插入记录（PostgreSQL）
+    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
+    #[cfg(feature = "postgres")]
+    async fn insert_postgres<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
+    where
+        E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send;
+
+    /// 插入记录（SQLite）
+    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
+    #[cfg(feature = "sqlite")]
+    async fn insert_sqlite<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
+    where
+        E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
 
     /// 更新记录（Patch 语义）
     ///
@@ -410,10 +205,26 @@ pub trait Crud:
     ///   - `Some(v)`：生成 `SET col = ?` 并绑定 `v`；
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
+    /// 更新记录（Patch 语义，MySQL）
     /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    async fn update<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    #[cfg(feature = "mysql")]
+    async fn update_mysql<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
     where
-        E: sqlx::Executor<'c> + Send;
+        E: sqlx::Executor<'c, Database = sqlx::MySql> + Send;
+
+    /// 更新记录（Patch 语义，PostgreSQL）
+    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
+    #[cfg(feature = "postgres")]
+    async fn update_postgres<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    where
+        E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send;
+
+    /// 更新记录（Patch 语义，SQLite）
+    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
+    #[cfg(feature = "sqlite")]
+    async fn update_sqlite<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    where
+        E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
 
     /// 更新记录（包含 None 字段的重置，Reset 语义）
     ///
@@ -422,44 +233,78 @@ pub trait Crud:
     ///   - Some(v)：更新为 v
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
+    /// 更新记录（Reset 语义，MySQL）
     /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    #[cfg(feature = "mysql")]
+    async fn update_with_none_mysql<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
     where
-        E: sqlx::Executor<'c> + Send;
+        E: sqlx::Executor<'c, Database = sqlx::MySql> + Send;
 
-    impl_find_by_id!(mysql, sqlx::MySql, find_by_id_mysql);
-    impl_find_by_id!(postgres, sqlx::Postgres, find_by_id_postgres);
-    impl_find_by_id!(sqlite, sqlx::Sqlite, find_by_id_sqlite);
+    /// 更新记录（Reset 语义，PostgreSQL）
+    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
+    #[cfg(feature = "postgres")]
+    async fn update_with_none_postgres<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    where
+        E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send;
 
-    impl_find_by_ids!(mysql, sqlx::MySql, find_by_ids_mysql);
-    impl_find_by_ids!(postgres, sqlx::Postgres, find_by_ids_postgres);
-    impl_find_by_ids!(sqlite, sqlx::Sqlite, find_by_ids_sqlite);
+    /// 更新记录（Reset 语义，SQLite）
+    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
+    #[cfg(feature = "sqlite")]
+    async fn update_with_none_sqlite<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    where
+        E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
 
-    impl_find_all!(mysql, sqlx::MySql, find_all_mysql);
-    impl_find_all!(postgres, sqlx::Postgres, find_all_postgres);
-    impl_find_all!(sqlite, sqlx::Sqlite, find_all_sqlite);
+    impl_find_by_id!("mysql", sqlx::MySql, find_by_id_mysql);
+    impl_find_by_id!("postgres", sqlx::Postgres, find_by_id_postgres);
+    impl_find_by_id!("sqlite", sqlx::Sqlite, find_by_id_sqlite);
 
-    impl_find_one!(mysql, sqlx::MySql, find_one_mysql);
-    impl_find_one!(postgres, sqlx::Postgres, find_one_postgres);
-    impl_find_one!(sqlite, sqlx::Sqlite, find_one_sqlite);
+    impl_find_by_ids!("mysql", sqlx::MySql, find_by_ids_mysql);
+    impl_find_by_ids!("postgres", sqlx::Postgres, find_by_ids_postgres);
+    impl_find_by_ids!("sqlite", sqlx::Sqlite, find_by_ids_sqlite);
 
-    impl_count!(mysql, sqlx::MySql, count_mysql);
-    impl_count!(postgres, sqlx::Postgres, count_postgres);
-    impl_count!(sqlite, sqlx::Sqlite, count_sqlite);
+    impl_find_all!("mysql", sqlx::MySql, find_all_mysql);
+    impl_find_all!("postgres", sqlx::Postgres, find_all_postgres);
+    impl_find_all!("sqlite", sqlx::Sqlite, find_all_sqlite);
 
-    impl_hard_delete_by_id!(mysql, sqlx::MySql, hard_delete_by_id_mysql);
-    impl_hard_delete_by_id!(postgres, sqlx::Postgres, hard_delete_by_id_postgres);
-    impl_hard_delete_by_id!(sqlite, sqlx::Sqlite, hard_delete_by_id_sqlite);
+    impl_find_one!("mysql", sqlx::MySql, find_one_mysql);
+    impl_find_one!("postgres", sqlx::Postgres, find_one_postgres);
+    impl_find_one!("sqlite", sqlx::Sqlite, find_one_sqlite);
 
-    impl_soft_delete_by_id!(mysql, sqlx::MySql, soft_delete_by_id_mysql);
-    impl_soft_delete_by_id!(postgres, sqlx::Postgres, soft_delete_by_id_postgres);
-    impl_soft_delete_by_id!(sqlite, sqlx::Sqlite, soft_delete_by_id_sqlite);
+    impl_count!("mysql", sqlx::MySql, count_mysql);
+    impl_count!("postgres", sqlx::Postgres, count_postgres);
+    impl_count!("sqlite", sqlx::Sqlite, count_sqlite);
 
-    impl_delete_by_id!(mysql, sqlx::MySql);
-    impl_delete_by_id!(postgres, sqlx::Postgres);
-    impl_delete_by_id!(sqlite, sqlx::Sqlite);
+    impl_hard_delete_by_id!("mysql", sqlx::MySql, hard_delete_by_id_mysql);
+    impl_hard_delete_by_id!("postgres", sqlx::Postgres, hard_delete_by_id_postgres);
+    impl_hard_delete_by_id!("sqlite", sqlx::Sqlite, hard_delete_by_id_sqlite);
 
-    impl_paginate!(mysql, sqlx::MySql);
-    impl_paginate!(postgres, sqlx::Postgres);
-    impl_paginate!(sqlite, sqlx::Sqlite);
+    impl_soft_delete_by_id!("mysql", sqlx::MySql, soft_delete_by_id_mysql);
+    impl_soft_delete_by_id!("postgres", sqlx::Postgres, soft_delete_by_id_postgres);
+    impl_soft_delete_by_id!("sqlite", sqlx::Sqlite, soft_delete_by_id_sqlite);
+
+    impl_delete_by_id!(
+        "mysql",
+        sqlx::MySql,
+        delete_by_id_mysql,
+        soft_delete_by_id_mysql,
+        hard_delete_by_id_mysql
+    );
+    impl_delete_by_id!(
+        "postgres",
+        sqlx::Postgres,
+        delete_by_id_postgres,
+        soft_delete_by_id_postgres,
+        hard_delete_by_id_postgres
+    );
+    impl_delete_by_id!(
+        "sqlite",
+        sqlx::Sqlite,
+        delete_by_id_sqlite,
+        soft_delete_by_id_sqlite,
+        hard_delete_by_id_sqlite
+    );
+
+    impl_paginate!("mysql", sqlx::MySql, paginate_mysql);
+    impl_paginate!("postgres", sqlx::Postgres, paginate_postgres);
+    impl_paginate!("sqlite", sqlx::Sqlite, paginate_sqlite);
 }
