@@ -1,5 +1,5 @@
 use crate::crud::Page;
-use crate::error::{Result, SqlxPlusError};
+use crate::error::Result;
 use crate::query_builder::QueryBuilder;
 
 /// 主键 ID 类型
@@ -399,18 +399,9 @@ pub trait Crud:
 {
     /// 插入记录
     /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    async fn insert<E>(&self, _executor: E) -> Result<Id>
+    async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
     where
-        E: Send,
-    {
-        Err(SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
-            format!(
-                "insert() must be implemented by derive(CRUD) macro for {}",
-                std::any::type_name::<Self>()
-            )
-            .into(),
-        )))
-    }
+        E: sqlx::Executor<'c> + Send;
 
     /// 更新记录（Patch 语义）
     ///
@@ -420,18 +411,9 @@ pub trait Crud:
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
     /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    async fn update<E>(&self, _executor: E) -> Result<()>
+    async fn update<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
     where
-        E: Send,
-    {
-        Err(SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
-            format!(
-                "update() must be implemented by derive(CRUD) macro for {}",
-                std::any::type_name::<Self>()
-            )
-            .into(),
-        )))
-    }
+        E: sqlx::Executor<'c> + Send;
 
     /// 更新记录（包含 None 字段的重置，Reset 语义）
     ///
@@ -441,18 +423,9 @@ pub trait Crud:
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
     /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    async fn update_with_none<E>(&self, _executor: E) -> Result<()>
+    async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
     where
-        E: Send,
-    {
-        Err(SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
-            format!(
-                "update_with_none() must be implemented by derive(CRUD) macro for {}",
-                std::any::type_name::<Self>()
-            )
-            .into(),
-        )))
-    }
+        E: sqlx::Executor<'c> + Send;
 
     impl_find_by_id!(mysql, sqlx::MySql, find_by_id_mysql);
     impl_find_by_id!(postgres, sqlx::Postgres, find_by_id_postgres);

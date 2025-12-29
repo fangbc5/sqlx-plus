@@ -453,7 +453,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
             // MySQL 版本的 update
             #[cfg(feature = "mysql")]
-            async fn update<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
+            async fn update_mysql<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 E: sqlx::Executor<'c, Database = sqlx::MySql> + Send,
             {
@@ -812,7 +812,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             #[cfg(feature = "postgres")]
-            async fn insert<E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
+            async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
             where
                 E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
             {
@@ -820,7 +820,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             #[cfg(feature = "sqlite")]
-            async fn insert<E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
+            async fn insert<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
             where
                 E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
             {
@@ -836,7 +836,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             #[cfg(feature = "postgres")]
-            async fn update<E>(&self, executor: E) -> sqlxplus::Result<()>
+            async fn update<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
             {
@@ -844,7 +844,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             #[cfg(feature = "sqlite")]
-            async fn update<E>(&self, executor: E) -> sqlxplus::Result<()>
+            async fn update<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
             {
@@ -860,7 +860,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             #[cfg(feature = "postgres")]
-            async fn update_with_none<E>(&self, executor: E) -> sqlxplus::Result<()>
+            async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send,
             {
@@ -868,7 +868,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             #[cfg(feature = "sqlite")]
-            async fn update_with_none<E>(&self, executor: E) -> sqlxplus::Result<()>
+            async fn update_with_none<'e, 'c: 'e, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send,
             {
