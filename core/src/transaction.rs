@@ -97,6 +97,30 @@ impl<'tx> Transaction<'tx> {
         }
     }
 
+    #[cfg(feature = "mysql")]
+    pub fn as_mysql_transaction(&mut self) -> &mut sqlx::Transaction<'tx, sqlx::MySql> {
+        match self {
+            Transaction::MySql(tx) => tx,
+            _ => panic!("Transaction is not a MySQL transaction"),
+        }
+    }
+
+    #[cfg(feature = "postgres")]
+    pub fn as_postgres_transaction(&mut self) -> &mut sqlx::Transaction<'tx, sqlx::Postgres> {
+        match self {
+            Transaction::Postgres(tx) => tx,
+            _ => panic!("Transaction is not a PostgreSQL transaction"),
+        }
+    }
+
+    #[cfg(feature = "sqlite")]
+    pub fn as_sqlite_transaction(&mut self) -> &mut sqlx::Transaction<'tx, sqlx::Sqlite> {
+        match self {
+            Transaction::Sqlite(tx) => tx,
+            _ => panic!("Transaction is not a SQLite transaction"),
+        }
+    }
+
 }
 
 pub async fn with_transaction<F, T>(pool: &DbPool, f: F) -> crate::Result<T>
