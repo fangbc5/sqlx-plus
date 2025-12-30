@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     // ========== 3. FIND_BY_IDS (根据多个 ID 查找) ==========
     println!("=== 3. FIND_BY_IDS (根据多个 ID 查找) ===");
     let users =
-        User::find_by_ids::<sqlx::Postgres, _, _>(pool.pg_pool(), vec![id1, id2, id3]).await?;
+        User::find_by_ids(pool.pg_pool(), vec![id1, id2, id3]).await?;
     println!("找到 {} 条记录:", users.len());
     for user in &users {
         println!("  ID={:?}, username={:?}", user.id, user.username);
@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     let builder = QueryBuilder::new("SELECT * FROM \"user\"")
         .and_eq("id", id1)
         .order_by("id", false);
-    let one_user = User::find_one::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let one_user = User::find_one(pool.pg_pool(), builder).await?;
     println!(
         "find_one 结果: {:?}\n",
         one_user.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     // ========== 5. COUNT (统计记录数量) ==========
     println!("=== 5. COUNT (统计记录数量) ===");
     let builder = QueryBuilder::new("SELECT * FROM \"user\"");
-    let total = User::count::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let total = User::count(pool.pg_pool(), builder).await?;
     println!("未删除的记录数: {}\n", total);
 
     // ========== 6. UPDATE (更新 - Patch 语义) ==========
@@ -109,13 +109,13 @@ async fn main() -> anyhow::Result<()> {
     // ========== 8. FIND_ALL (查询所有记录) ==========
     println!("=== 8. FIND_ALL (查询所有记录) ===");
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").order_by("id", false);
-    let all_users = User::find_all::<sqlx::Postgres, _>(pool.pg_pool(), Some(builder)).await?;
+    let all_users = User::find_all(pool.pg_pool(), Some(builder)).await?;
     println!("find_all 返回 {} 条记录\n", all_users.len());
 
     // ========== 9. PAGINATE (分页查询) ==========
     println!("=== 9. PAGINATE (分页查询) ===");
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").order_by("id", false);
-    let page = User::paginate::<sqlx::Postgres, _>(pool.pg_pool(), builder, 1, 10).await?;
+    let page = User::paginate(pool.pg_pool(), builder, 1, 10).await?;
     println!(
         "分页结果: 总数={}, 当前页={} 条\n",
         page.total,
@@ -153,23 +153,23 @@ async fn main() -> anyhow::Result<()> {
 
     // AND 条件
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_gt("id", 0);
-    let count = User::count::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let count = User::count(pool.pg_pool(), builder).await?;
     println!("AND 条件查询: {} 条记录", count);
 
     // LIKE 查询
     let builder = QueryBuilder::new("SELECT * FROM \"user\"")
         .and_like("username", &format!("user1_{}", timestamp));
-    let count = User::count::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let count = User::count(pool.pg_pool(), builder).await?;
     println!("LIKE 查询: {} 条记录", count);
 
     // IN 查询
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_in("id", vec![id1, id2]);
-    let count = User::count::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let count = User::count(pool.pg_pool(), builder).await?;
     println!("IN 查询: {} 条记录", count);
 
     // BETWEEN 查询
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_between("id", id1, id3);
-    let count = User::count::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let count = User::count(pool.pg_pool(), builder).await?;
     println!("BETWEEN 查询: {} 条记录", count);
 
     println!();
@@ -294,7 +294,7 @@ async fn main() -> anyhow::Result<()> {
             let count_builder =
                 QueryBuilder::new("SELECT * FROM \"user\"").and_eq("id", closure_id);
             let count = {
-                User::count::<sqlx::Postgres, _>(tx.as_postgres_executor(), count_builder).await?
+                User::count(tx.as_postgres_executor(), count_builder).await?
             };
             println!("闭包事务中查询记录数: {}", count);
 
@@ -404,13 +404,13 @@ async fn main() -> anyhow::Result<()> {
             // 查询多条记录
             let ids = vec![id1, id2];
             let users =
-                User::find_by_ids::<sqlx::Postgres, _, _>(tx.as_postgres_executor(), ids).await?;
+                User::find_by_ids(tx.as_postgres_executor(), ids).await?;
             println!("查询到 {} 条记录", users.len());
 
             // 统计记录数
             let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_in("id", vec![id1, id2]);
             let count =
-                User::count::<sqlx::Postgres, _>(tx.as_postgres_executor(), builder).await?;
+                User::count(tx.as_postgres_executor(), builder).await?;
             println!("统计记录数: {}", count);
 
             // 返回两个 ID
@@ -571,7 +571,7 @@ async fn main() -> anyhow::Result<()> {
             let builder = QueryBuilder::new("SELECT * FROM \"user\"")
                 .and_like("username", &format!("nested_user2_{}", timestamp));
             let count =
-                User::count::<sqlx::Postgres, _>(tx.as_postgres_executor(), builder).await?;
+                User::count(tx.as_postgres_executor(), builder).await?;
             if count == 0 {
                 println!("验证成功：子事务回滚后，子事务中的记录不存在");
             } else {
@@ -596,7 +596,7 @@ async fn main() -> anyhow::Result<()> {
     // 验证子事务的记录确实不存在
     let builder = QueryBuilder::new("SELECT * FROM \"user\"")
         .and_like("username", &format!("nested_user2_{}", timestamp));
-    let count = User::count::<sqlx::Postgres, _>(pool.pg_pool(), builder).await?;
+    let count = User::count(pool.pg_pool(), builder).await?;
     if count == 0 {
         println!("验证成功：子事务回滚后，子事务中的记录确实不存在\n");
     } else {
