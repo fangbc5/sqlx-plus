@@ -139,19 +139,13 @@ where
 }
 
 #[cfg(feature = "mysql")]
-pub async fn with_nested_transaction<F, T>(tx: &mut Transaction<'_>, f: F) -> crate::Result<T>
+pub async fn with_mysql_nested_transaction<F, T>(tx: &mut Transaction<'_>, f: F) -> crate::Result<T>
 where
     F: for<'a> FnOnce(
         &'a mut Transaction<'_>,
     ) -> Pin<Box<dyn Future<Output = crate::Result<T>> + Send + 'a>>,
     T: Send,
 {
-    // 获取事务的执行器
-    // let executor = match tx {
-    //     Transaction::MySql(tx) => ,
-    //     Transaction::Postgres(tx) => tx.as_postgres_executor(),
-    //     Transaction::Sqlite(tx) => tx.as_sqlite_executor(),
-    // };
     // Create a savepoint
     sqlx::query("SAVEPOINT nested_tx")
         .execute(tx.as_mysql_executor())
@@ -169,6 +163,37 @@ where
             // Rollback to savepoint
             let _ = sqlx::query("ROLLBACK TO SAVEPOINT nested_tx")
                 .execute(tx.as_mysql_executor())
+                .await;
+            Err(e)
+        }
+    }
+}
+
+#[cfg(feature = "postgres")]
+pub async fn with_postgres_nested_transaction<F, T>(tx: &mut Transaction<'_>, f: F) -> crate::Result<T>
+where
+    F: for<'a> FnOnce(
+        &'a mut Transaction<'_>,
+    ) -> Pin<Box<dyn Future<Output = crate::Result<T>> + Send + 'a>>,
+    T: Send,
+{
+    // Create a savepoint
+    sqlx::query("SAVEPOINT nested_tx")
+        .execute(tx.as_postgres_executor())
+        .await?;
+
+    match f(tx).await {
+        Ok(result) => {
+            // Release savepoint (equivalent to commit)
+            sqlx::query("RELEASE SAVEPOINT nested_tx")
+                .execute(tx.as_postgres_executor())
+                .await?;
+            Ok(result)
+        }
+        Err(e) => {
+            // Rollback to savepoint
+            let _ = sqlx::query("ROLLBACK TO SAVEPOINT nested_tx")
+                .execute(tx.as_postgres_executor())
                 .await;
             Err(e)
         }
