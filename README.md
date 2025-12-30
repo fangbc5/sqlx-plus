@@ -21,7 +21,7 @@
 
 ```toml
 [dependencies]
-sqlxplus = { version = "0.1.8", features = ["mysql"] }
+sqlxplus = { version = "0.1.9", features = ["mysql"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "mysql"] }
 tokio = { version = "1.40", features = ["full"] }
 ```
