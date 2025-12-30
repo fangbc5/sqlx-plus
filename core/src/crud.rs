@@ -24,6 +24,28 @@ macro_rules! apply_bind_value {
             BindValue::Int16(i) => {
                 $query = $query.bind(*i);
             }
+            // i8, u64, u32, u16, u8 在 PostgreSQL 中不支持，但保留在 BindValue 中用于 QueryBuilder
+            // 这些类型在 CRUD 操作中会通过类型转换处理
+            BindValue::Int8(i) => {
+                // 转换为 i16（三种数据库都支持的最小整数类型）
+                $query = $query.bind(*i as i16);
+            }
+            BindValue::UInt64(i) => {
+                // 转换为 i64（注意：可能溢出，但这是跨数据库兼容的折中方案）
+                $query = $query.bind(*i as i64);
+            }
+            BindValue::UInt32(i) => {
+                // 转换为 i64
+                $query = $query.bind(*i as i64);
+            }
+            BindValue::UInt16(i) => {
+                // 转换为 i32
+                $query = $query.bind(*i as i32);
+            }
+            BindValue::UInt8(i) => {
+                // 转换为 i16
+                $query = $query.bind(*i as i16);
+            }
             BindValue::Float64(f) => {
                 $query = $query.bind(f);
             }
@@ -31,6 +53,9 @@ macro_rules! apply_bind_value {
                 $query = $query.bind(*f);
             }
             BindValue::Bool(b) => {
+                $query = $query.bind(b);
+            }
+            BindValue::Bytes(b) => {
                 $query = $query.bind(b);
             }
             BindValue::Null => {
@@ -65,6 +90,7 @@ where
     DB: Database + DatabaseInfo,
     for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
     // 基本类型必须实现 Type<DB> 和 Encode<DB>（这些对于 sqlx 支持的所有数据库都自动满足）
+    // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
     String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -72,6 +98,7 @@ where
     f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     for bind in binds {
@@ -107,6 +134,7 @@ where
     for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
     M: for<'r> sqlx::FromRow<'r, DB::Row>,
     // 基本类型必须实现 Type<DB> 和 Encode<DB>（这些对于 sqlx 支持的所有数据库都自动满足）
+    // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
     String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -114,6 +142,7 @@ where
     f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     for bind in binds {
@@ -354,6 +383,7 @@ where
     E: sqlx::Executor<'c, Database = DB> + Send,
     // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
     // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+    // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
     String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -361,6 +391,7 @@ where
     f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     // 使用 DatabaseInfo trait 获取数据库特定信息
@@ -439,6 +470,7 @@ where
     E: sqlx::Executor<'c, Database = DB> + Send,
     // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
     // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+    // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
     String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -446,6 +478,7 @@ where
     f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     // 使用 DatabaseInfo trait 获取数据库特定信息
@@ -526,6 +559,7 @@ where
     // i64 还需要实现 Decode<DB>（用于从查询结果中读取）
     // usize 需要实现 ColumnIndex<DB::Row>（用于通过索引访问列）
     // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+    // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
     String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB> + for<'r> sqlx::Decode<'r, DB>,
     i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -533,6 +567,7 @@ where
     f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
 {
@@ -615,6 +650,7 @@ where
     // i64 还需要实现 Decode<DB>（用于从查询结果中读取）
     // usize 需要实现 ColumnIndex<DB::Row>（用于通过索引访问列）
     // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+    // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
     String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB> + for<'r> sqlx::Decode<'r, DB>,
     i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -622,6 +658,7 @@ where
     f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
 {

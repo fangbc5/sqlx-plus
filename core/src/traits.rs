@@ -55,16 +55,31 @@ pub trait Crud:
         i64: sqlx::Type<DB> + for<'r> sqlx::Decode<'r, DB>,
         usize: sqlx::ColumnIndex<DB::Row>,
         // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
         String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i64: for<'b> sqlx::Encode<'b, DB>,
         i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
@@ -96,12 +111,26 @@ pub trait Crud:
         i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
@@ -133,12 +162,26 @@ pub trait Crud:
         i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
@@ -253,6 +296,7 @@ pub trait Crud:
             > + Send
             + Unpin,
         // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
         String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
@@ -266,6 +310,8 @@ pub trait Crud:
         f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
@@ -313,6 +359,7 @@ pub trait Crud:
             > + Send
             + Unpin,
         // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
         String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
@@ -326,6 +373,8 @@ pub trait Crud:
         f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
@@ -378,6 +427,8 @@ pub trait Crud:
         f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
@@ -444,6 +495,8 @@ pub trait Crud:
         f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
         Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
