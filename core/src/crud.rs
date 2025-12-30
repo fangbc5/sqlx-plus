@@ -1,8 +1,9 @@
+use crate::database_info::DatabaseInfo;
 use crate::error::{Result, SqlxPlusError};
 use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
 use crate::utils::escape_identifier;
-use sqlx::Row;
+use sqlx::{Database, Row};
 
 /// 主键 ID 类型
 pub type Id = i64;
@@ -112,80 +113,85 @@ impl<T> Page<T> {
     }
 }
 
-/// 宏：生成数据库特定版本的 find_by_id 函数
-/// 用于减少重复代码，统一处理不同数据库驱动的差异
-macro_rules! impl_find_by_id_for_db {
-    (
-        $feature:literal,
-        $db_type:ty,
-        $row_type:ty,
-        $driver:expr,
-        $placeholder:expr,
-        $fn_name:ident
-    ) => {
-        #[cfg(feature = $feature)]
-        pub async fn $fn_name<'e, 'c: 'e, M, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
-        ) -> Result<Option<M>>
-        where
-            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            let escaped_table = escape_identifier($driver, M::TABLE);
-            let escaped_pk = escape_identifier($driver, M::PK);
-            let mut sql_str = format!(
-                "SELECT * FROM {} WHERE {} = {}",
-                escaped_table, escaped_pk, $placeholder
-            );
-            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-                let escaped_field = escape_identifier($driver, soft_delete_field);
-                sql_str.push_str(&format!(" AND {} = 0", escaped_field));
-            }
+/// 根据 ID 查找单条记录（泛型版本）
+///
+/// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+///
+/// # 类型参数
+///
+/// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+/// * `M` - 模型类型，必须实现 `Model` trait 和对应数据库的 `FromRow`
+/// * `E` - 执行器类型，可以是连接池或事务
+///
+/// # 参数
+///
+/// * `executor` - 数据库执行器（连接池或事务）
+/// * `id` - 主键 ID 值
+///
+/// # 返回值
+///
+/// 如果找到记录，返回 `Ok(Some(M))`；如果未找到，返回 `Ok(None)`
+///
+/// # 示例
+///
+/// ```rust,ignore
+/// use sqlxplus::{DatabaseInfo, crud};
+///
+/// // MySQL
+/// let user = crud::find_by_id::<sqlx::MySql, User, _>(pool, 1).await?;
+///
+/// // PostgreSQL
+/// let user = crud::find_by_id::<sqlx::Postgres, User, _>(pool, 1).await?;
+///
+/// // SQLite
+/// let user = crud::find_by_id::<sqlx::Sqlite, User, _>(pool, 1).await?;
+/// ```
+pub async fn find_by_id<'e, 'c: 'e, DB, M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+) -> Result<Option<M>>
+where
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+    M: Model + for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+    E: sqlx::Executor<'c, Database = DB> + Send,
+{
+    // 使用 DatabaseInfo trait 获取数据库特定信息
+    let escaped_table = DB::escape_identifier(M::TABLE);
+    let escaped_pk = DB::escape_identifier(M::PK);
+    let placeholder = DB::placeholder(0);
 
-            match sqlx::query(&sql_str)
-                .bind(id)
-                .fetch_optional(executor)
-                .await?
-            {
-                Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
-                    SqlxPlusError::DatabaseError(sqlx::Error::Decode(
-                        Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>
-                    ))
-                })?)),
-                None => Ok(None),
-            }
-        }
+    let sql_str = if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = DB::escape_identifier(soft_delete_field);
+        format!(
+            "SELECT * FROM {} WHERE {} = {} AND {} = 0",
+            escaped_table, escaped_pk, placeholder, escaped_field
+        )
+    } else {
+        format!(
+            "SELECT * FROM {} WHERE {} = {}",
+            escaped_table, escaped_pk, placeholder
+        )
     };
+
+    // 执行查询 - sqlx::query 可以从 executor 推断数据库类型
+    match sqlx::query(&sql_str)
+        .bind(id)
+        .fetch_optional(executor)
+        .await?
+    {
+        Some(row) => Ok(Some(sqlx::FromRow::from_row(&row).map_err(|e| {
+            SqlxPlusError::DatabaseError(sqlx::Error::Decode(
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>
+            ))
+        })?)),
+        None => Ok(None),
+    }
 }
 
-// 使用宏生成不同数据库版本的 find_by_id 函数
-impl_find_by_id_for_db!(
-    "mysql",
-    sqlx::MySql,
-    sqlx::mysql::MySqlRow,
-    crate::db_pool::DbDriver::MySql,
-    "?",
-    find_by_id_mysql
-);
-
-impl_find_by_id_for_db!(
-    "postgres",
-    sqlx::Postgres,
-    sqlx::postgres::PgRow,
-    crate::db_pool::DbDriver::Postgres,
-    "$1",
-    find_by_id_postgres
-);
-
-impl_find_by_id_for_db!(
-    "sqlite",
-    sqlx::Sqlite,
-    sqlx::sqlite::SqliteRow,
-    crate::db_pool::DbDriver::Sqlite,
-    "?",
-    find_by_id_sqlite
-);
+// 注意：find_by_id_mysql, find_by_id_postgres, find_by_id_sqlite 等兼容层函数已移除
+// 现在直接使用泛型版本的 find_by_id<DB, M, E>
+// trait 中的方法直接调用泛型版本，不再需要这些中间函数
 
 /// 宏：生成数据库特定版本的 find_by_ids 函数
 macro_rules! impl_find_by_ids_for_db {

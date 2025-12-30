@@ -5,22 +5,6 @@ use crate::query_builder::QueryBuilder;
 /// 主键 ID 类型
 pub type Id = i64;
 
-/// 宏：为 Crud trait 生成 find_by_id 方法
-macro_rules! impl_find_by_id {
-    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = $feature)]
-        async fn $crud_fn<'e, 'c: 'e, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
-        ) -> Result<Option<Self>>
-        where
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            crate::crud::$crud_fn(executor, id).await
-        }
-    };
-}
-
 /// 宏：为 Crud trait 生成 find_by_ids 方法
 macro_rules! impl_find_by_ids {
     ($feature:literal, $db_type:ty, $crud_fn:ident) => {
@@ -254,9 +238,40 @@ pub trait Crud:
     where
         E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
 
-    impl_find_by_id!("mysql", sqlx::MySql, find_by_id_mysql);
-    impl_find_by_id!("postgres", sqlx::Postgres, find_by_id_postgres);
-    impl_find_by_id!("sqlite", sqlx::Sqlite, find_by_id_sqlite);
+    /// 根据 ID 查找单条记录（泛型版本）
+    ///
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`User::find_by_id::<sqlx::MySql, _>(pool, id)`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // MySQL
+    /// let user = User::find_by_id::<sqlx::MySql, _>(pool, 1).await?;
+    ///
+    /// // PostgreSQL
+    /// let user = User::find_by_id::<sqlx::Postgres, _>(pool, 1).await?;
+    ///
+    /// // SQLite
+    /// let user = User::find_by_id::<sqlx::Sqlite, _>(pool, 1).await?;
+    /// ```
+    async fn find_by_id<'e, 'c: 'e, DB, E>(
+        executor: E,
+        id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+    ) -> Result<Option<Self>>
+    where
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        Self: for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+    {
+        crate::crud::find_by_id::<DB, Self, E>(executor, id).await
+    }
 
     impl_find_by_ids!("mysql", sqlx::MySql, find_by_ids_mysql);
     impl_find_by_ids!("postgres", sqlx::Postgres, find_by_ids_postgres);

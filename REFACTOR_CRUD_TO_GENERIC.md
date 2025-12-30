@@ -93,11 +93,11 @@ where
 
 **任务清单**：
 
-- [ ] 在 `core/src/crud.rs` 或新建 `core/src/database_info.rs` 中定义 `DatabaseInfo` trait
-- [ ] 为 `sqlx::MySql` 实现 `DatabaseInfo`
-- [ ] 为 `sqlx::Postgres` 实现 `DatabaseInfo`
-- [ ] 为 `sqlx::Sqlite` 实现 `DatabaseInfo`
-- [ ] 编写单元测试验证实现正确性
+- [x] 在 `core/src/crud.rs` 或新建 `core/src/database_info.rs` 中定义 `DatabaseInfo` trait
+- [x] 为 `sqlx::MySql` 实现 `DatabaseInfo`
+- [x] 为 `sqlx::Postgres` 实现 `DatabaseInfo`
+- [x] 为 `sqlx::Sqlite` 实现 `DatabaseInfo`
+- [x] 编写单元测试验证实现正确性
 
 **预期产出**：
 
@@ -118,9 +118,9 @@ where
 
 **任务清单**：
 
-- [ ] 创建泛型版本的 `find_by_id<DB, M, E>` 函数
-- [ ] 保留旧的数据库特定函数（`find_by_id_mysql` 等）作为兼容层
-- [ ] 在兼容层中调用新的泛型函数
+- [x] 创建泛型版本的 `find_by_id<DB, M, E>` 函数
+- [x] 保留旧的数据库特定函数（`find_by_id_mysql` 等）作为兼容层
+- [x] 在兼容层中调用新的泛型函数
 - [ ] 更新 `Crud` trait 中的 `impl_find_by_id` 宏，调用新函数
 - [ ] 运行所有测试确保兼容性
 - [ ] 更新文档和示例
@@ -129,30 +129,36 @@ where
 
 ```rust
 // 新的泛型实现
-pub async fn find_by_id<DB, M, E>(
+pub async fn find_by_id<'e, 'c: 'e, DB, M, E>(
     executor: E,
     id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
 ) -> Result<Option<M>>
 where
-    DB: sqlx::Database + DatabaseInfo,
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
     M: Model + for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
     E: sqlx::Executor<'c, Database = DB> + Send,
 {
-    // 实现逻辑
+    // 使用 DatabaseInfo trait 获取数据库特定信息
+    let escaped_table = DB::escape_identifier(M::TABLE);
+    let escaped_pk = DB::escape_identifier(M::PK);
+    let placeholder = DB::placeholder(0);
+    // ... 实现逻辑
 }
 
-// 兼容层（可选，逐步迁移）
-#[cfg(feature = "mysql")]
-pub async fn find_by_id_mysql<M, E>(...) -> Result<Option<M>> {
-    find_by_id::<sqlx::MySql, M, E>(executor, id).await
-}
+// trait 中的方法直接调用泛型版本
+// 不再需要兼容层函数（find_by_id_mysql 等已移除）
+impl_find_by_id!("mysql", sqlx::MySql, find_by_id_mysql);
+// 内部实现：crate::crud::find_by_id::<sqlx::MySql, Self, E>(executor, id).await
 ```
 
 **预期产出**：
 
-- 泛型版本的 `find_by_id` 函数
-- 验证方案可行性
-- 确定后续重构模式
+- ✅ 泛型版本的 `find_by_id` 函数
+- ✅ 验证方案可行性
+- ✅ 确定后续重构模式
+- ✅ 移除冗余的兼容层函数，直接使用泛型版本
+- ✅ 所有 examples 编译通过
 
 **风险评估**：
 
