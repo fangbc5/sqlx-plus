@@ -33,82 +33,141 @@ pub trait Crud:
     + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
     + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
 {
-    /// 插入记录（MySQL）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "mysql")]
-    async fn insert_mysql<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
+    /// 插入记录（泛型版本）
+    ///
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`user.insert::<sqlx::MySql, _>(pool).await?`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // MySQL
+    /// let id = user.insert::<sqlx::MySql, _>(pool).await?;
+    ///
+    /// // PostgreSQL
+    /// let id = user.insert::<sqlx::Postgres, _>(pool).await?;
+    ///
+    /// // SQLite
+    /// let id = user.insert::<sqlx::Sqlite, _>(pool).await?;
+    /// ```
+    async fn insert<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<Id>
     where
-        E: sqlx::Executor<'c, Database = sqlx::MySql> + Send;
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+        // PostgreSQL 使用 query_scalar 需要这些约束
+        i64: sqlx::Type<DB> + for<'r> sqlx::Decode<'r, DB>,
+        usize: sqlx::ColumnIndex<DB::Row>,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
-    /// 插入记录（PostgreSQL）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "postgres")]
-    async fn insert_postgres<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
-    where
-        E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send;
-
-    /// 插入记录（SQLite）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "sqlite")]
-    async fn insert_sqlite<'e, 'c: 'e, E>(&self, executor: E) -> Result<Id>
-    where
-        E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
-
-    /// 更新记录（Patch 语义）
+    /// 更新记录（Patch 语义，泛型版本）
     ///
     /// - 非 `Option` 字段：始终参与更新，生成 `SET col = ?` 并绑定当前值。
     /// - `Option` 字段：
     ///   - `Some(v)`：生成 `SET col = ?` 并绑定 `v`；
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
-    /// 更新记录（Patch 语义，MySQL）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "mysql")]
-    async fn update_mysql<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`user.update::<sqlx::MySql, _>(pool).await?`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // MySQL
+    /// user.update::<sqlx::MySql, _>(pool).await?;
+    ///
+    /// // PostgreSQL
+    /// user.update::<sqlx::Postgres, _>(pool).await?;
+    ///
+    /// // SQLite
+    /// user.update::<sqlx::Sqlite, _>(pool).await?;
+    /// ```
+    async fn update<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<()>
     where
-        E: sqlx::Executor<'c, Database = sqlx::MySql> + Send;
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
-    /// 更新记录（Patch 语义，PostgreSQL）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "postgres")]
-    async fn update_postgres<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
-    where
-        E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send;
-
-    /// 更新记录（Patch 语义，SQLite）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "sqlite")]
-    async fn update_sqlite<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
-    where
-        E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
-
-    /// 更新记录（包含 None 字段的重置，Reset 语义）
+    /// 更新记录（包含 None 字段的重置，Reset 语义，泛型版本）
     ///
     /// - 非 Option 字段：与 `update` 相同，始终参与更新
     /// - Option 字段：
     ///   - Some(v)：更新为 v
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
-    /// 更新记录（Reset 语义，MySQL）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "mysql")]
-    async fn update_with_none_mysql<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`user.update_with_none::<sqlx::MySql, _>(pool).await?`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // MySQL
+    /// user.update_with_none::<sqlx::MySql, _>(pool).await?;
+    ///
+    /// // PostgreSQL
+    /// user.update_with_none::<sqlx::Postgres, _>(pool).await?;
+    ///
+    /// // SQLite
+    /// user.update_with_none::<sqlx::Sqlite, _>(pool).await?;
+    /// ```
+    async fn update_with_none<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<()>
     where
-        E: sqlx::Executor<'c, Database = sqlx::MySql> + Send;
-
-    /// 更新记录（Reset 语义，PostgreSQL）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "postgres")]
-    async fn update_with_none_postgres<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
-    where
-        E: sqlx::Executor<'c, Database = sqlx::Postgres> + Send;
-
-    /// 更新记录（Reset 语义，SQLite）
-    /// 注意：此方法必须由 derive(CRUD) 宏生成具体实现
-    #[cfg(feature = "sqlite")]
-    async fn update_with_none_sqlite<'e, 'c: 'e, E>(&self, executor: E) -> Result<()>
-    where
-        E: sqlx::Executor<'c, Database = sqlx::Sqlite> + Send;
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
     /// 根据 ID 查找单条记录（泛型版本）
     ///
