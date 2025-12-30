@@ -193,84 +193,86 @@ where
 // 现在直接使用泛型版本的 find_by_id<DB, M, E>
 // trait 中的方法直接调用泛型版本，不再需要这些中间函数
 
-/// 宏：生成数据库特定版本的 find_by_ids 函数
-macro_rules! impl_find_by_ids_for_db {
-    (
-        $feature:literal,
-        $db_type:ty,
-        $row_type:ty,
-        $driver:expr,
-        $fn_name:ident,
-        $placeholder_gen:expr
-    ) => {
-        #[cfg(feature = $feature)]
-        pub async fn $fn_name<'e, 'c: 'e, M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
-        where
-            M: Model + for<'r> sqlx::FromRow<'r, $row_type> + Send + Unpin,
-            I: IntoIterator + Send,
-            I::Item:
-                for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync + Clone,
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            let ids_vec: Vec<_> = ids.into_iter().collect();
-            if ids_vec.is_empty() {
-                return Ok(Vec::new());
-            }
+/// 根据多个 ID 查找记录（泛型版本）
+///
+/// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+///
+/// # 类型参数
+///
+/// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+/// * `M` - 模型类型，必须实现 `Model` trait 和对应数据库的 `FromRow`
+/// * `I` - ID 集合类型，可以是 `Vec<T>` 或其他实现了 `IntoIterator` 的类型
+/// * `E` - 执行器类型，可以是连接池或事务
+///
+/// # 参数
+///
+/// * `executor` - 数据库执行器（连接池或事务）
+/// * `ids` - 主键 ID 集合
+///
+/// # 返回值
+///
+/// 返回找到的所有记录，如果没有找到任何记录，返回空向量
+///
+/// # 示例
+///
+/// ```rust,ignore
+/// use sqlxplus::{DatabaseInfo, crud};
+///
+/// // MySQL
+/// let users = crud::find_by_ids::<sqlx::MySql, User, _, _>(pool, vec![1, 2, 3]).await?;
+///
+/// // PostgreSQL
+/// let users = crud::find_by_ids::<sqlx::Postgres, User, _, _>(pool, vec![1, 2, 3]).await?;
+///
+/// // SQLite
+/// let users = crud::find_by_ids::<sqlx::Sqlite, User, _, _>(pool, vec![1, 2, 3]).await?;
+/// ```
+pub async fn find_by_ids<'e, 'c: 'e, DB, M, I, E>(executor: E, ids: I) -> Result<Vec<M>>
+where
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+    M: Model + for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+    I: IntoIterator + Send,
+    I::Item: for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync + Clone,
+    E: sqlx::Executor<'c, Database = DB> + Send,
+{
+    let ids_vec: Vec<_> = ids.into_iter().collect();
+    if ids_vec.is_empty() {
+        return Ok(Vec::new());
+    }
 
-            let escaped_table = escape_identifier($driver, M::TABLE);
-            let escaped_pk = escape_identifier($driver, M::PK);
-            let placeholders_str = ($placeholder_gen)(ids_vec.len());
-            let mut sql_str = format!(
-                "SELECT * FROM {} WHERE {} IN ({})",
-                escaped_table, escaped_pk, placeholders_str
-            );
-            if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
-                let escaped_field = escape_identifier($driver, soft_delete_field);
-                sql_str.push_str(&format!(" AND {} = 0", escaped_field));
-            }
+    // 使用 DatabaseInfo trait 获取数据库特定信息
+    let escaped_table = DB::escape_identifier(M::TABLE);
+    let escaped_pk = DB::escape_identifier(M::PK);
 
-            let mut query = sqlx::query_as::<$db_type, M>(&sql_str);
-            for id in &ids_vec {
-                query = query.bind(id.clone());
-            }
-            query
-                .fetch_all(executor)
-                .await
-                .map_err(|e| SqlxPlusError::DatabaseError(e))
-        }
-    };
+    // 为每个 ID 生成占位符
+    let placeholders: Vec<String> = (0..ids_vec.len()).map(|i| DB::placeholder(i)).collect();
+    let placeholders_str = placeholders.join(", ");
+
+    let mut sql_str = format!(
+        "SELECT * FROM {} WHERE {} IN ({})",
+        escaped_table, escaped_pk, placeholders_str
+    );
+
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        let escaped_field = DB::escape_identifier(soft_delete_field);
+        sql_str.push_str(&format!(" AND {} = 0", escaped_field));
+    }
+
+    // 执行查询
+    let mut query = sqlx::query_as::<DB, M>(&sql_str);
+    for id in &ids_vec {
+        query = query.bind(id.clone());
+    }
+    query
+        .fetch_all(executor)
+        .await
+        .map_err(|e| SqlxPlusError::DatabaseError(e))
 }
 
-// 使用宏生成不同数据库版本的 find_by_ids 函数
-impl_find_by_ids_for_db!(
-    "mysql",
-    sqlx::MySql,
-    sqlx::mysql::MySqlRow,
-    crate::db_pool::DbDriver::MySql,
-    find_by_ids_mysql,
-    |len| (0..len).map(|_| "?").collect::<Vec<_>>().join(", ")
-);
-
-impl_find_by_ids_for_db!(
-    "postgres",
-    sqlx::Postgres,
-    sqlx::postgres::PgRow,
-    crate::db_pool::DbDriver::Postgres,
-    find_by_ids_postgres,
-    |len| (1..=len)
-        .map(|i| format!("${}", i))
-        .collect::<Vec<_>>()
-        .join(", ")
-);
-
-impl_find_by_ids_for_db!(
-    "sqlite",
-    sqlx::Sqlite,
-    sqlx::sqlite::SqliteRow,
-    crate::db_pool::DbDriver::Sqlite,
-    find_by_ids_sqlite,
-    |len| (0..len).map(|_| "?").collect::<Vec<_>>().join(", ")
-);
+// 注意：find_by_ids_mysql, find_by_ids_postgres, find_by_ids_sqlite 等兼容层函数已移除
+// 现在直接使用泛型版本的 find_by_ids<DB, M, I, E>
+// trait 中的方法直接调用泛型版本，不再需要这些中间函数
 
 /// 宏：生成数据库特定版本的 hard_delete_by_id 函数
 macro_rules! impl_hard_delete_by_id_for_db {

@@ -62,7 +62,8 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 3. FIND_BY_IDS (根据多个 ID 查找) ==========
     println!("=== 3. FIND_BY_IDS (根据多个 ID 查找) ===");
-    let users = User::find_by_ids_mysql(pool.mysql_pool(), vec![id1, id2, id3]).await?;
+    let users =
+        User::find_by_ids::<sqlx::MySql, _, _>(pool.mysql_pool(), vec![id1, id2, id3]).await?;
     println!("找到 {} 条记录:", users.len());
     for user in &users {
         println!("  ID={:?}, username={:?}", user.id, user.username);
@@ -378,7 +379,7 @@ async fn main() -> anyhow::Result<()> {
 
             // 查询多条记录
             let ids = vec![id1, id2];
-            let users = User::find_by_ids_mysql(tx.as_mysql_executor(), ids).await?;
+            let users = User::find_by_ids::<sqlx::MySql, _, _>(tx.as_mysql_executor(), ids).await?;
             println!("查询到 {} 条记录", users.len());
 
             // 统计记录数
