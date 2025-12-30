@@ -4,8 +4,7 @@ use std::pin::Pin;
 use sqlx::{MySqlConnection, PgConnection, SqliteConnection};
 
 use crate::db_pool::{DbDriver, DbPool};
-use crate::error::{SqlxPlusError, Result};
-
+use crate::error::{Result, SqlxPlusError};
 
 /// 数据库事务包装器
 /// 自动处理提交和回滚
@@ -22,15 +21,9 @@ pub enum Transaction<'tx> {
 impl<'tx> Transaction<'tx> {
     pub async fn begin(pool: &DbPool) -> Result<Self> {
         match pool.driver() {
-            DbDriver::MySql => {
-                Ok(Transaction::MySql(pool.mysql_pool().ok_or(SqlxPlusError::NoPoolAvailable)?.begin().await?))
-            }
-            DbDriver::Postgres => {
-                Ok(Transaction::Postgres(pool.pg_pool().ok_or(SqlxPlusError::NoPoolAvailable)?.begin().await?))
-            }
-            DbDriver::Sqlite => {
-                Ok(Transaction::Sqlite(pool.sqlite_pool().ok_or(SqlxPlusError::NoPoolAvailable)?.begin().await?))
-            }
+            DbDriver::MySql => Ok(Transaction::MySql(pool.mysql_pool().begin().await?)),
+            DbDriver::Postgres => Ok(Transaction::Postgres(pool.pg_pool().begin().await?)),
+            DbDriver::Sqlite => Ok(Transaction::Sqlite(pool.sqlite_pool().begin().await?)),
         }
     }
 
@@ -120,7 +113,6 @@ impl<'tx> Transaction<'tx> {
             _ => panic!("Transaction is not a SQLite transaction"),
         }
     }
-
 }
 
 pub async fn with_transaction<F, T>(pool: &DbPool, f: F) -> crate::Result<T>
@@ -147,12 +139,11 @@ where
 }
 
 #[cfg(feature = "mysql")]
-pub async fn with_nested_transaction<F, T>(
-    tx: &mut Transaction<'_>,
-    f: F,
-) -> crate::Result<T>
+pub async fn with_nested_transaction<F, T>(tx: &mut Transaction<'_>, f: F) -> crate::Result<T>
 where
-    F: for<'a> FnOnce(&'a mut Transaction<'_>) -> Pin<Box<dyn Future<Output = crate::Result<T>> + Send + 'a>>,
+    F: for<'a> FnOnce(
+        &'a mut Transaction<'_>,
+    ) -> Pin<Box<dyn Future<Output = crate::Result<T>> + Send + 'a>>,
     T: Send,
 {
     // 获取事务的执行器

@@ -2,8 +2,8 @@
 use sqlx::Pool;
 use std::sync::Arc;
 
+use crate::error::{Result, SqlxPlusError};
 use crate::executor::DbExecutor;
-use crate::error::{SqlxPlusError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbDriver {
@@ -136,18 +136,24 @@ impl DbPool {
     }
 
     #[cfg(feature = "mysql")]
-    pub fn mysql_pool(&self) -> Option<&Pool<sqlx::MySql>> {
-        self.mysql.as_deref()
+    pub fn mysql_pool(&self) -> &Pool<sqlx::MySql> {
+        self.mysql
+            .as_deref()
+            .expect("MySQL pool is not initialized")
     }
 
     #[cfg(feature = "postgres")]
-    pub fn pg_pool(&self) -> Option<&Pool<sqlx::Postgres>> {
-        self.pg.as_deref()
+    pub fn pg_pool(&self) -> &Pool<sqlx::Postgres> {
+        self.pg
+            .as_deref()
+            .expect("PostgreSQL pool is not initialized")
     }
 
     #[cfg(feature = "sqlite")]
-    pub fn sqlite_pool(&self) -> Option<&Pool<sqlx::Sqlite>> {
-        self.sqlite.as_deref()
+    pub fn sqlite_pool(&self) -> &Pool<sqlx::Sqlite> {
+        self.sqlite
+            .as_deref()
+            .expect("SQLite pool is not initialized")
     }
 
     pub fn convert_sql(&self, sql: &str) -> String {
@@ -159,7 +165,10 @@ impl DbPool {
         match self.driver {
             #[cfg(feature = "mysql")]
             DbDriver::MySql => {
-                let pool = self.mysql.as_deref().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let pool = self
+                    .mysql
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let result = sqlx::query(&sql).execute(pool).await?;
                 Ok(result.rows_affected())
             }
@@ -171,7 +180,10 @@ impl DbPool {
             }
             #[cfg(feature = "sqlite")]
             DbDriver::Sqlite => {
-                let pool = self.sqlite.as_deref().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let pool = self
+                    .sqlite
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let result = sqlx::query(&sql).execute(pool).await?;
                 Ok(result.rows_affected())
             }
@@ -192,7 +204,10 @@ impl DbPool {
         match self.driver {
             #[cfg(feature = "mysql")]
             DbDriver::MySql => {
-                let pool = self.mysql.as_deref().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let pool = self
+                    .mysql
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let rows: Vec<T> = sqlx::query_as(&sql).fetch_all(pool).await?;
                 Ok(rows)
             }
@@ -204,7 +219,10 @@ impl DbPool {
             }
             #[cfg(feature = "sqlite")]
             DbDriver::Sqlite => {
-                let pool = self.sqlite.as_deref().ok_or(SqlxPlusError::NoPoolAvailable)?;
+                let pool = self
+                    .sqlite
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let rows: Vec<T> = sqlx::query_as(&sql).fetch_all(pool).await?;
                 Ok(rows)
             }

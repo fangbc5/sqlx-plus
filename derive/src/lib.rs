@@ -329,19 +329,19 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     placeholders.join(", ")
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#insert_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#insert_option_field_names.is_some() {
-                        query = query.bind(&self.#insert_option_field_names);
-                    }
-                )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#insert_option_field_names.is_some() {
+                                query = query.bind(&self.#insert_option_field_names);
+                            }
+                        )*
                 let result = query.execute(executor).await?;
-                Ok(result.last_insert_id() as i64)
+                            Ok(result.last_insert_id() as i64)
             }
 
             // PostgreSQL 版本的 insert
@@ -355,7 +355,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let table = Self::TABLE;
                 let pk = Self::PK;
                 let escaped_table = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, table);
-                let escaped_pk = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, pk);
+                        let escaped_pk = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, pk);
 
                 // 构建列名和占位符（PostgreSQL 使用 $1, $2, ...）
                 let mut columns: Vec<&str> = Vec::new();
@@ -387,18 +387,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 );
 
                 let mut query = sqlx::query_scalar::<_, i64>(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#insert_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#insert_option_field_names.is_some() {
-                        query = query.bind(&self.#insert_option_field_names);
-                    }
-                )*
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#insert_option_field_names.is_some() {
+                                query = query.bind(&self.#insert_option_field_names);
+                            }
+                        )*
                 let id: i64 = query.fetch_one(executor).await?;
-                Ok(id)
+                            Ok(id)
             }
 
             // SQLite 版本的 insert
@@ -437,19 +437,19 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     placeholders.join(", ")
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#insert_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#insert_option_field_names.is_some() {
-                        query = query.bind(&self.#insert_option_field_names);
-                    }
-                )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#insert_option_field_names.is_some() {
+                                query = query.bind(&self.#insert_option_field_names);
+                            }
+                        )*
                 let result = query.execute(executor).await?;
-                Ok(result.last_insert_rowid() as i64)
+                            Ok(result.last_insert_rowid() as i64)
             }
 
             // MySQL 版本的 update
@@ -485,24 +485,24 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 }
 
                 let sql = format!(
-                    "UPDATE {} SET {} WHERE {} = ?",
-                    escaped_table,
-                    set_parts.join(", "),
-                    escaped_pk,
+                        "UPDATE {} SET {} WHERE {} = ?",
+                        escaped_table,
+                        set_parts.join(", "),
+                        escaped_pk,
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#update_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        query = query.bind(&self.#update_option_field_names);
-                    }
-                )*
-                query = query.bind(&self.#pk_ident);
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
             }
@@ -550,18 +550,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     placeholder_index
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#update_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        query = query.bind(&self.#update_option_field_names);
-                    }
-                )*
-                query = query.bind(&self.#pk_ident);
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
             }
@@ -605,18 +605,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     escaped_pk,
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#update_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        query = query.bind(&self.#update_option_field_names);
-                    }
-                )*
-                query = query.bind(&self.#pk_ident);
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
             }
@@ -643,13 +643,13 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 )*
 
                 // Option 字段：Some -> ?，None -> DEFAULT
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        set_parts.push(format!("{} = ?", #update_option_field_columns));
-                    } else {
-                        set_parts.push(format!("{} = DEFAULT", #update_option_field_columns));
-                    }
-                )*
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                set_parts.push(format!("{} = ?", #update_option_field_columns));
+                            } else {
+                                set_parts.push(format!("{} = DEFAULT", #update_option_field_columns));
+                            }
+                        )*
 
                 if set_parts.is_empty() {
                     return Ok(());
@@ -662,18 +662,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     escaped_pk,
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#update_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT）
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        query = query.bind(&self.#update_option_field_names);
-                    }
-                )*
-                query = query.bind(&self.#pk_ident);
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT）
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
             }
@@ -706,7 +706,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     if self.#update_option_field_names.is_some() {
                         set_parts.push(format!("{} = ${}", #update_option_field_columns, placeholder_index));
                         placeholder_index += 1;
-                    } else {
+                        } else {
                         set_parts.push(format!("{} = DEFAULT", #update_option_field_columns));
                     }
                 )*
@@ -723,18 +723,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     placeholder_index
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#update_normal_field_names);
-                )*
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
                 // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT）
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        query = query.bind(&self.#update_option_field_names);
-                    }
-                )*
-                query = query.bind(&self.#pk_ident);
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
             }
@@ -780,18 +780,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     escaped_pk,
                 );
 
-                let mut query = sqlx::query(&sql);
-                // 非 Option 字段：始终绑定
-                #(
-                    query = query.bind(&self.#update_normal_field_names);
-                )*
-                // Option 字段：仅当为 Some 时绑定
-                #(
-                    if self.#update_option_field_names.is_some() {
-                        query = query.bind(&self.#update_option_field_names);
-                    }
-                )*
-                query = query.bind(&self.#pk_ident);
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#update_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if self.#update_option_field_names.is_some() {
+                                query = query.bind(&self.#update_option_field_names);
+                            }
+                        )*
+                        query = query.bind(&self.#pk_ident);
                 query.execute(executor).await?;
                 Ok(())
             }

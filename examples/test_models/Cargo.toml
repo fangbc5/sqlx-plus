@@ -10,7 +10,7 @@ postgres = []
 sqlite = []
 
 [dependencies]
-sqlxplus = { path = "../../core", default-features = false, features = ["mysql", "postgres", "sqlite"] }
+sqlxplus = { path = "../../core" }
 async-trait = { workspace = true }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "sqlite", "mysql", "postgres"] }
 serde = { workspace = true }

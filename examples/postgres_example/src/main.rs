@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id1 = user1.insert_postgres(pool.pg_pool().unwrap()).await?;
+    let id1 = user1.insert_postgres(pool.pg_pool()).await?;
     println!("插入成功，ID: {}\n", id1);
 
     let user2 = User {
@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id2 = user2.insert_postgres(pool.pg_pool().unwrap()).await?;
+    let id2 = user2.insert_postgres(pool.pg_pool()).await?;
     println!("插入成功，ID: {}\n", id2);
 
     let user3 = User {
@@ -50,12 +50,12 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id3 = user3.insert_postgres(pool.pg_pool().unwrap()).await?;
+    let id3 = user3.insert_postgres(pool.pg_pool()).await?;
     println!("插入成功，ID: {}\n", id3);
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
     println!("=== 2. FIND_BY_ID (根据 ID 查找) ===");
-    let found = User::find_by_id(pool.pg_pool().unwrap(), id1).await?;
+    let found = User::find_by_id_postgres(pool.pg_pool(), id1).await?;
     println!(
         "找到用户: {:?}\n",
         found.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 3. FIND_BY_IDS (根据多个 ID 查找) ==========
     println!("=== 3. FIND_BY_IDS (根据多个 ID 查找) ===");
-    let users = User::find_by_ids(pool.pg_pool().unwrap(), vec![id1, id2, id3]).await?;
+    let users = User::find_by_ids_postgres(pool.pg_pool(), vec![id1, id2, id3]).await?;
     println!("找到 {} 条记录:", users.len());
     for user in &users {
         println!("  ID={:?}, username={:?}", user.id, user.username);
@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let builder = QueryBuilder::new("SELECT * FROM \"user\"")
         .and_eq("id", id1)
         .order_by("id", false);
-    let one_user = User::find_one(pool.pg_pool().unwrap(), builder).await?;
+    let one_user = User::find_one_postgres(pool.pg_pool(), builder).await?;
     println!(
         "find_one 结果: {:?}\n",
         one_user.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -84,37 +84,36 @@ async fn main() -> anyhow::Result<()> {
     // ========== 5. COUNT (统计记录数量) ==========
     println!("=== 5. COUNT (统计记录数量) ===");
     let builder = QueryBuilder::new("SELECT * FROM \"user\"");
-    let total = User::count(pool.pg_pool().unwrap(), builder).await?;
+    let total = User::count_postgres(pool.pg_pool(), builder).await?;
     println!("未删除的记录数: {}\n", total);
 
     // ========== 6. UPDATE (更新 - Patch 语义) ==========
     println!("=== 6. UPDATE (更新 - Patch 语义) ===");
-    if let Some(mut user) = User::find_by_id(pool.pg_pool().unwrap(), id1).await? {
+    if let Some(mut user) = User::find_by_id_postgres(pool.pg_pool(), id1).await? {
         user.email = Some(format!("updated_{}@example.com", timestamp));
         user.system_type = Some(2i16);
-        user.update_postgres(pool.pg_pool().unwrap()).await?;
+        user.update_postgres(pool.pg_pool()).await?;
         println!("更新成功（Patch 语义：None 字段不更新）\n");
     }
 
     // ========== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ==========
     println!("=== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ===");
-    if let Some(mut user) = User::find_by_id(pool.pg_pool().unwrap(), id1).await? {
+    if let Some(mut user) = User::find_by_id_postgres(pool.pg_pool(), id1).await? {
         user.system_type = None;
-        user.update_with_none_postgres(pool.pg_pool().unwrap())
-            .await?;
+        user.update_with_none_postgres(pool.pg_pool()).await?;
         println!("更新成功（Reset 语义：None 字段重置为默认值）\n");
     }
 
     // ========== 8. FIND_ALL (查询所有记录) ==========
     println!("=== 8. FIND_ALL (查询所有记录) ===");
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").order_by("id", false);
-    let all_users = User::find_all(pool.pg_pool().unwrap(), Some(builder)).await?;
+    let all_users = User::find_all_postgres(pool.pg_pool(), Some(builder)).await?;
     println!("find_all 返回 {} 条记录\n", all_users.len());
 
     // ========== 9. PAGINATE (分页查询) ==========
     println!("=== 9. PAGINATE (分页查询) ===");
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").order_by("id", false);
-    let page = User::paginate(pool.pg_pool().unwrap(), builder, 1, 10).await?;
+    let page = User::paginate_postgres(pool.pg_pool(), builder, 1, 10).await?;
     println!(
         "分页结果: 总数={}, 当前页={} 条\n",
         page.total,
@@ -123,11 +122,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 10. SOFT_DELETE (逻辑删除) ==========
     println!("=== 10. SOFT_DELETE (逻辑删除) ===");
-    User::soft_delete_by_id(pool.pg_pool().unwrap(), id2).await?;
+    User::soft_delete_by_id_postgres(pool.pg_pool(), id2).await?;
     println!("逻辑删除 ID={} 成功", id2);
 
     // 验证逻辑删除后 find_by_id 返回 None
-    let deleted = User::find_by_id(pool.pg_pool().unwrap(), id2).await?;
+    let deleted = User::find_by_id_postgres(pool.pg_pool(), id2).await?;
     if deleted.is_none() {
         println!("验证成功：逻辑删除后 find_by_id 返回 None\n");
     } else {
@@ -136,11 +135,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 11. HARD_DELETE (物理删除) ==========
     println!("=== 11. HARD_DELETE (物理删除) ===");
-    User::hard_delete_by_id(pool.pg_pool().unwrap(), id3).await?;
+    User::hard_delete_by_id_postgres(pool.pg_pool(), id3).await?;
     println!("物理删除 ID={} 成功", id3);
 
     // 验证物理删除后记录不存在
-    let deleted = User::find_by_id(pool.pg_pool().unwrap(), id3).await?;
+    let deleted = User::find_by_id_postgres(pool.pg_pool(), id3).await?;
     if deleted.is_none() {
         println!("验证成功：物理删除后记录不存在\n");
     } else {
@@ -152,23 +151,23 @@ async fn main() -> anyhow::Result<()> {
 
     // AND 条件
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_gt("id", 0);
-    let count = User::count(pool.pg_pool().unwrap(), builder).await?;
+    let count = User::count_postgres(pool.pg_pool(), builder).await?;
     println!("AND 条件查询: {} 条记录", count);
 
     // LIKE 查询
     let builder = QueryBuilder::new("SELECT * FROM \"user\"")
         .and_like("username", &format!("user1_{}", timestamp));
-    let count = User::count(pool.pg_pool().unwrap(), builder).await?;
+    let count = User::count_postgres(pool.pg_pool(), builder).await?;
     println!("LIKE 查询: {} 条记录", count);
 
     // IN 查询
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_in("id", vec![id1, id2]);
-    let count = User::count(pool.pg_pool().unwrap(), builder).await?;
+    let count = User::count_postgres(pool.pg_pool(), builder).await?;
     println!("IN 查询: {} 条记录", count);
 
     // BETWEEN 查询
     let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_between("id", id1, id3);
-    let count = User::count(pool.pg_pool().unwrap(), builder).await?;
+    let count = User::count_postgres(pool.pg_pool(), builder).await?;
     println!("BETWEEN 查询: {} 条记录", count);
 
     println!();
@@ -191,7 +190,8 @@ async fn main() -> anyhow::Result<()> {
         println!("事务中插入记录，ID: {}", tx_id1);
 
         // 在事务中更新记录
-        if let Some(mut user) = User::find_by_id(tx.as_postgres_executor(), tx_id1).await? {
+        if let Some(mut user) = User::find_by_id_postgres(tx.as_postgres_executor(), tx_id1).await?
+        {
             user.email = Some(format!("tx_updated_{}@example.com", timestamp));
             user.update_postgres(tx.as_postgres_executor()).await?;
             println!("事务中更新记录成功");
@@ -202,7 +202,7 @@ async fn main() -> anyhow::Result<()> {
         println!("事务提交成功");
 
         // 验证事务提交后的数据
-        let committed_user = User::find_by_id(pool.pg_pool().unwrap(), tx_id1).await?;
+        let committed_user = User::find_by_id_postgres(pool.pg_pool(), tx_id1).await?;
         if let Some(user) = committed_user {
             println!(
                 "验证成功：事务提交后可以查询到记录，email: {:?}\n",
@@ -231,7 +231,7 @@ async fn main() -> anyhow::Result<()> {
         println!("事务中插入记录，ID: {}", tx_id2);
 
         // 在事务中查询记录（应该能查到）
-        let tx_user = User::find_by_id(tx.as_postgres_executor(), tx_id2).await?;
+        let tx_user = User::find_by_id_postgres(tx.as_postgres_executor(), tx_id2).await?;
         if tx_user.is_some() {
             println!("事务中可以查询到记录");
         }
@@ -243,7 +243,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // 验证事务回滚后的数据（应该查询不到）
-    let rolled_back_user = User::find_by_id(pool.pg_pool().unwrap(), rollback_id).await?;
+    let rolled_back_user = User::find_by_id_postgres(pool.pg_pool(), rollback_id).await?;
     if rolled_back_user.is_none() {
         println!("验证成功：事务回滚后记录不存在\n");
     } else {
@@ -270,7 +270,7 @@ async fn main() -> anyhow::Result<()> {
             println!("闭包事务中插入记录，ID: {}", closure_id);
 
             // 在事务中更新记录
-            let user_opt = User::find_by_id(tx.as_postgres_executor(), closure_id).await?;
+            let user_opt = User::find_by_id_postgres(tx.as_postgres_executor(), closure_id).await?;
             if let Some(mut user) = user_opt {
                 user.email = Some(format!("closure_updated_{}@example.com", timestamp));
                 user.update_postgres(tx.as_postgres_executor()).await?;
@@ -280,7 +280,7 @@ async fn main() -> anyhow::Result<()> {
             // 在事务中查询记录
             let count_builder =
                 QueryBuilder::new("SELECT * FROM \"user\"").and_eq("id", closure_id);
-            let count = { User::count(tx.as_postgres_executor(), count_builder).await? };
+            let count = { User::count_postgres(tx.as_postgres_executor(), count_builder).await? };
             println!("闭包事务中查询记录数: {}", count);
 
             // 返回成功，事务会自动提交
@@ -291,7 +291,7 @@ async fn main() -> anyhow::Result<()> {
     println!("闭包事务提交成功，返回 ID: {}", closure_id);
 
     // 验证闭包事务提交后的数据
-    let closure_user = User::find_by_id(pool.pg_pool().unwrap(), closure_id).await?;
+    let closure_user = User::find_by_id_postgres(pool.pg_pool(), closure_id).await?;
     if let Some(user) = closure_user {
         println!(
             "验证成功：闭包事务提交后可以查询到记录，email: {:?}\n",
@@ -322,7 +322,8 @@ async fn main() -> anyhow::Result<()> {
                 println!("闭包事务中插入记录，ID: {}", rollback_id);
 
                 // 在事务中查询记录（应该能查到）
-                let tx_user = User::find_by_id(tx.as_postgres_executor(), rollback_id).await?;
+                let tx_user =
+                    User::find_by_id_postgres(tx.as_postgres_executor(), rollback_id).await?;
                 if tx_user.is_some() {
                     println!("闭包事务中可以查询到记录");
                 }
@@ -371,7 +372,7 @@ async fn main() -> anyhow::Result<()> {
             println!("插入第二条记录，ID: {}", id2);
 
             // 更新第一条记录
-            let u_opt = User::find_by_id(tx.as_postgres_executor(), id1).await?;
+            let u_opt = User::find_by_id_postgres(tx.as_postgres_executor(), id1).await?;
             if let Some(mut u) = u_opt {
                 u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
                 u.update_postgres(tx.as_postgres_executor()).await?;
@@ -380,12 +381,12 @@ async fn main() -> anyhow::Result<()> {
 
             // 查询多条记录
             let ids = vec![id1, id2];
-            let users = User::find_by_ids(tx.as_postgres_executor(), ids).await?;
+            let users = User::find_by_ids_postgres(tx.as_postgres_executor(), ids).await?;
             println!("查询到 {} 条记录", users.len());
 
             // 统计记录数
             let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_in("id", vec![id1, id2]);
-            let count = User::count(tx.as_postgres_executor(), builder).await?;
+            let count = User::count_postgres(tx.as_postgres_executor(), builder).await?;
             println!("统计记录数: {}", count);
 
             // 返回两个 ID
@@ -399,8 +400,8 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 验证复杂事务提交后的数据
-    let complex_user1 = User::find_by_id(pool.pg_pool().unwrap(), complex_id1).await?;
-    let complex_user2 = User::find_by_id(pool.pg_pool().unwrap(), complex_id2).await?;
+    let complex_user1 = User::find_by_id_postgres(pool.pg_pool(), complex_id1).await?;
+    let complex_user2 = User::find_by_id_postgres(pool.pg_pool(), complex_id2).await?;
     if complex_user1.is_some() && complex_user2.is_some() {
         println!("验证成功：复杂事务提交后两条记录都存在\n");
     } else {
