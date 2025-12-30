@@ -408,6 +408,171 @@ async fn main() -> anyhow::Result<()> {
         println!("警告：复杂事务提交后记录不完整！\n");
     }
 
+    // ========== 18. NESTED TRANSACTION - 子事务（成功） ==========
+    println!("=== 18. NESTED TRANSACTION - 子事务（成功） ===");
+    let nested_id = sqlxplus::with_transaction(&pool, |tx| {
+        Box::pin(async move {
+            println!("父事务开始");
+
+            // 在父事务中插入记录
+            let parent_user = User {
+                id: None,
+                username: Some(format!("parent_user_{}", timestamp)),
+                email: Some(format!("parent_user_{}@example.com", timestamp)),
+                is_del: Some(0i16),
+                ..Default::default()
+            };
+            let parent_id = parent_user
+                .insert_postgres(tx.as_postgres_executor())
+                .await?;
+            println!("父事务中插入记录，ID: {}", parent_id);
+
+            // 创建子事务（保存点）
+            let nested_id = sqlxplus::with_postgres_nested_transaction(tx, |nested_tx| {
+                Box::pin(async move {
+                    println!("子事务开始（保存点）");
+
+                    // 在子事务中插入记录
+                    let nested_user = User {
+                        id: None,
+                        username: Some(format!("nested_user_{}", timestamp)),
+                        email: Some(format!("nested_user_{}@example.com", timestamp)),
+                        is_del: Some(0i16),
+                        ..Default::default()
+                    };
+                    let nested_id = nested_user
+                        .insert_postgres(nested_tx.as_postgres_executor())
+                        .await?;
+                    println!("子事务中插入记录，ID: {}", nested_id);
+
+                    // 在子事务中查询记录
+                    let nested_found =
+                        User::find_by_id_postgres(nested_tx.as_postgres_executor(), nested_id)
+                            .await?;
+                    if nested_found.is_some() {
+                        println!("子事务中可以查询到记录");
+                    }
+
+                    // 子事务成功，释放保存点
+                    Ok::<i64, sqlxplus::SqlxPlusError>(nested_id)
+                })
+            })
+            .await?;
+            println!("子事务成功，保存点已释放");
+
+            // 在父事务中验证子事务插入的记录
+            let nested_found =
+                User::find_by_id_postgres(tx.as_postgres_executor(), nested_id).await?;
+            if nested_found.is_some() {
+                println!("父事务中可以查询到子事务插入的记录");
+            }
+
+            // 父事务提交
+            Ok::<i64, sqlxplus::SqlxPlusError>(nested_id)
+        })
+    })
+    .await?;
+
+    // 验证子事务提交后的数据
+    let nested_user = User::find_by_id_postgres(pool.pg_pool(), nested_id).await?;
+    if nested_user.is_some() {
+        println!("验证成功：子事务提交后记录存在\n");
+    } else {
+        println!("警告：子事务提交后记录不存在！\n");
+    }
+
+    // ========== 19. NESTED TRANSACTION - 子事务（失败回滚） ==========
+    println!("=== 19. NESTED TRANSACTION - 子事务（失败回滚） ===");
+    let parent_id_final = sqlxplus::with_transaction(&pool, |tx| {
+        Box::pin(async move {
+            println!("父事务开始（子事务将失败）");
+
+            // 在父事务中插入记录
+            let parent_user = User {
+                id: None,
+                username: Some(format!("parent_user2_{}", timestamp)),
+                email: Some(format!("parent_user2_{}@example.com", timestamp)),
+                is_del: Some(0i16),
+                ..Default::default()
+            };
+            let parent_id = parent_user
+                .insert_postgres(tx.as_postgres_executor())
+                .await?;
+            println!("父事务中插入记录，ID: {}", parent_id);
+
+            // 创建子事务（保存点），但子事务会失败
+            let nested_result = sqlxplus::with_postgres_nested_transaction(tx, |nested_tx| {
+                Box::pin(async move {
+                    println!("子事务开始（将失败）");
+
+                    // 在子事务中插入记录
+                    let nested_user = User {
+                        id: None,
+                        username: Some(format!("nested_user2_{}", timestamp)),
+                        email: Some(format!("nested_user2_{}@example.com", timestamp)),
+                        is_del: Some(0i16),
+                        ..Default::default()
+                    };
+                    let nested_id = nested_user
+                        .insert_postgres(nested_tx.as_postgres_executor())
+                        .await?;
+                    println!("子事务中插入记录，ID: {}", nested_id);
+
+                    // 在子事务中查询记录（应该能查到）
+                    let nested_found =
+                        User::find_by_id_postgres(nested_tx.as_postgres_executor(), nested_id)
+                            .await?;
+                    if nested_found.is_some() {
+                        println!("子事务中可以查询到记录");
+                    }
+
+                    // 子事务失败，回滚到保存点
+                    Err::<i64, sqlxplus::SqlxPlusError>(sqlxplus::SqlxPlusError::DatabaseError(
+                        sqlx::Error::RowNotFound,
+                    ))
+                })
+            })
+            .await;
+
+            if nested_result.is_err() {
+                println!("子事务失败，已回滚到保存点");
+            }
+
+            // 在父事务中验证子事务插入的记录应该不存在（因为已回滚）
+            // 注意：由于子事务回滚，nested_id 不可用，我们通过查询所有记录来验证
+            let builder = QueryBuilder::new("SELECT * FROM \"user\"")
+                .and_like("username", &format!("nested_user2_{}", timestamp));
+            let count = User::count_postgres(tx.as_postgres_executor(), builder).await?;
+            if count == 0 {
+                println!("验证成功：子事务回滚后，子事务中的记录不存在");
+            } else {
+                println!("警告：子事务回滚后，子事务中的记录仍然存在！");
+            }
+
+            // 父事务继续，提交父事务中的记录
+            Ok::<i64, sqlxplus::SqlxPlusError>(parent_id)
+        })
+    })
+    .await?;
+
+    // 验证父事务提交后的数据（子事务的记录应该不存在）
+    let parent_user = User::find_by_id_postgres(pool.pg_pool(), parent_id_final).await?;
+    if parent_user.is_some() {
+        println!("验证成功：父事务提交后，父事务中的记录存在");
+    } else {
+        println!("警告：父事务提交后，父事务中的记录不存在！");
+    }
+
+    // 验证子事务的记录确实不存在
+    let builder = QueryBuilder::new("SELECT * FROM \"user\"")
+        .and_like("username", &format!("nested_user2_{}", timestamp));
+    let count = User::count_postgres(pool.pg_pool(), builder).await?;
+    if count == 0 {
+        println!("验证成功：子事务回滚后，子事务中的记录确实不存在\n");
+    } else {
+        println!("警告：子事务回滚后，子事务中的记录仍然存在！\n");
+    }
+
     println!("所有 CRUD 方法测试完成！");
     Ok(())
 }

@@ -147,23 +147,29 @@ where
     T: Send,
 {
     // Create a savepoint
-    sqlx::query("SAVEPOINT nested_tx")
-        .execute(tx.as_mysql_executor())
-        .await?;
+
+    use sqlx::Executor;
+    // sqlx::query("SAVEPOINT nested_tx")
+    //     .execute(tx.as_mysql_executor())
+    //     .await?;
+    tx.as_mysql_executor().execute("SAVEPOINT nested_tx").await?;
 
     match f(tx).await {
         Ok(result) => {
             // Release savepoint (equivalent to commit)
-            sqlx::query("RELEASE SAVEPOINT nested_tx")
-                .execute(tx.as_mysql_executor())
-                .await?;
+            // sqlx::query("RELEASE SAVEPOINT nested_tx")
+            //     .execute(tx.as_mysql_executor())
+            //     .await?;
+            tx.as_mysql_executor().execute("RELEASE SAVEPOINT nested_tx").await?;
+
             Ok(result)
         }
         Err(e) => {
             // Rollback to savepoint
-            let _ = sqlx::query("ROLLBACK TO SAVEPOINT nested_tx")
-                .execute(tx.as_mysql_executor())
-                .await;
+            // let _ = sqlx::query("ROLLBACK TO SAVEPOINT nested_tx")
+            //     .execute(tx.as_mysql_executor())
+            //     .await;
+            let _ = tx.as_mysql_executor().execute("ROLLBACK TO SAVEPOINT nested_tx").await;
             Err(e)
         }
     }
