@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 10. SOFT_DELETE (逻辑删除) ==========
     println!("=== 10. SOFT_DELETE (逻辑删除) ===");
-    User::soft_delete_by_id_mysql(pool.mysql_pool(), id2).await?;
+    User::soft_delete_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id2).await?;
     println!("逻辑删除 ID={} 成功", id2);
 
     // 验证逻辑删除后 find_by_id 返回 None
@@ -135,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 11. HARD_DELETE (物理删除) ==========
     println!("=== 11. HARD_DELETE (物理删除) ===");
-    User::hard_delete_by_id_mysql(pool.mysql_pool(), id3).await?;
+    User::hard_delete_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id3).await?;
     println!("物理删除 ID={} 成功", id3);
 
     // 验证物理删除后记录不存在

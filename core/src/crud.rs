@@ -2,7 +2,6 @@ use crate::database_info::DatabaseInfo;
 use crate::error::{Result, SqlxPlusError};
 use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
-use crate::utils::escape_identifier;
 use sqlx::{Database, Row};
 
 /// 主键 ID 类型
@@ -663,123 +662,173 @@ where
 // 现在直接使用泛型版本的 paginate<DB, M, E>
 // trait 中的方法直接调用泛型版本，不再需要这些中间函数
 
-/// 宏：生成数据库特定版本的 hard_delete_by_id 函数
-macro_rules! impl_hard_delete_by_id_for_db {
-    (
-        $feature:literal,
-        $db_type:ty,
-        $driver:expr,
-        $placeholder:expr,
-        $fn_name:ident
-    ) => {
-        #[cfg(feature = $feature)]
-        pub async fn $fn_name<'e, 'c: 'e, M, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
-        ) -> Result<()>
-        where
-            M: Model,
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            let escaped_table = escape_identifier($driver, M::TABLE);
-            let escaped_pk = escape_identifier($driver, M::PK);
-            let sql = format!(
-                "DELETE FROM {} WHERE {} = {}",
-                escaped_table, escaped_pk, $placeholder
-            );
-            sqlx::query(&sql).bind(id).execute(executor).await?;
-            Ok(())
-        }
-    };
+/// 根据 ID 物理删除记录（泛型版本）
+///
+/// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+///
+/// # 类型参数
+///
+/// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+/// * `M` - 模型类型，必须实现 `Model` trait
+/// * `E` - 执行器类型，可以是连接池或事务
+///
+/// # 参数
+///
+/// * `executor` - 数据库执行器（连接池或事务）
+/// * `id` - 主键 ID 值
+///
+/// # 返回值
+///
+/// 删除成功返回 `Ok(())`
+///
+/// # 示例
+///
+/// ```rust,ignore
+/// use sqlxplus::{DatabaseInfo, crud};
+///
+/// // MySQL
+/// crud::hard_delete_by_id::<sqlx::MySql, User, _>(pool, 1).await?;
+///
+/// // PostgreSQL
+/// crud::hard_delete_by_id::<sqlx::Postgres, User, _>(pool, 1).await?;
+///
+/// // SQLite
+/// crud::hard_delete_by_id::<sqlx::Sqlite, User, _>(pool, 1).await?;
+/// ```
+pub async fn hard_delete_by_id<'e, 'c: 'e, DB, M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+) -> Result<()>
+where
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+    M: Model,
+    E: sqlx::Executor<'c, Database = DB> + Send,
+{
+    let escaped_table = DB::escape_identifier(M::TABLE);
+    let escaped_pk = DB::escape_identifier(M::PK);
+    let placeholder = DB::placeholder(0);
+    let sql = format!(
+        "DELETE FROM {} WHERE {} = {}",
+        escaped_table, escaped_pk, placeholder
+    );
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
 }
 
-// 使用宏生成不同数据库版本的 hard_delete_by_id 函数
-impl_hard_delete_by_id_for_db!(
-    "mysql",
-    sqlx::MySql,
-    crate::db_pool::DbDriver::MySql,
-    "?",
-    hard_delete_by_id_mysql
-);
+/// 根据 ID 逻辑删除记录（泛型版本）
+///
+/// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+/// 逻辑删除会将 `SOFT_DELETE_FIELD` 字段设置为 1。
+///
+/// # 类型参数
+///
+/// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+/// * `M` - 模型类型，必须实现 `Model` trait 且定义了 `SOFT_DELETE_FIELD`
+/// * `E` - 执行器类型，可以是连接池或事务
+///
+/// # 参数
+///
+/// * `executor` - 数据库执行器（连接池或事务）
+/// * `id` - 主键 ID 值
+///
+/// # 返回值
+///
+/// 删除成功返回 `Ok(())`；如果模型未定义 `SOFT_DELETE_FIELD`，返回错误
+///
+/// # 示例
+///
+/// ```rust,ignore
+/// use sqlxplus::{DatabaseInfo, crud};
+///
+/// // MySQL
+/// crud::soft_delete_by_id::<sqlx::MySql, User, _>(pool, 1).await?;
+///
+/// // PostgreSQL
+/// crud::soft_delete_by_id::<sqlx::Postgres, User, _>(pool, 1).await?;
+///
+/// // SQLite
+/// crud::soft_delete_by_id::<sqlx::Sqlite, User, _>(pool, 1).await?;
+/// ```
+pub async fn soft_delete_by_id<'e, 'c: 'e, DB, M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+) -> Result<()>
+where
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+    M: Model,
+    E: sqlx::Executor<'c, Database = DB> + Send,
+{
+    let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
+        SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
+            format!(
+                "Model {} does not have SOFT_DELETE_FIELD defined",
+                std::any::type_name::<M>()
+            )
+            .into(),
+        ))
+    })?;
 
-impl_hard_delete_by_id_for_db!(
-    "postgres",
-    sqlx::Postgres,
-    crate::db_pool::DbDriver::Postgres,
-    "$1",
-    hard_delete_by_id_postgres
-);
-
-impl_hard_delete_by_id_for_db!(
-    "sqlite",
-    sqlx::Sqlite,
-    crate::db_pool::DbDriver::Sqlite,
-    "?",
-    hard_delete_by_id_sqlite
-);
-
-/// 宏：生成数据库特定版本的 soft_delete_by_id 函数
-macro_rules! impl_soft_delete_by_id_for_db {
-    (
-        $feature:literal,
-        $db_type:ty,
-        $driver:expr,
-        $placeholder:expr,
-        $fn_name:ident
-    ) => {
-        #[cfg(feature = $feature)]
-        pub async fn $fn_name<'e, 'c: 'e, M, E>(
-            executor: E,
-            id: impl for<'q> sqlx::Encode<'q, $db_type> + sqlx::Type<$db_type> + Send + Sync,
-        ) -> Result<()>
-        where
-            M: Model,
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
-                SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
-                    format!(
-                        "Model {} does not have SOFT_DELETE_FIELD defined",
-                        std::any::type_name::<M>()
-                    )
-                    .into(),
-                ))
-            })?;
-
-            let escaped_table = escape_identifier($driver, M::TABLE);
-            let escaped_pk = escape_identifier($driver, M::PK);
-            let escaped_field = escape_identifier($driver, soft_delete_field);
-            let sql = format!(
-                "UPDATE {} SET {} = 1 WHERE {} = {}",
-                escaped_table, escaped_field, escaped_pk, $placeholder
-            );
-            sqlx::query(&sql).bind(id).execute(executor).await?;
-            Ok(())
-        }
-    };
+    let escaped_table = DB::escape_identifier(M::TABLE);
+    let escaped_pk = DB::escape_identifier(M::PK);
+    let escaped_field = DB::escape_identifier(soft_delete_field);
+    let placeholder = DB::placeholder(0);
+    let sql = format!(
+        "UPDATE {} SET {} = 1 WHERE {} = {}",
+        escaped_table, escaped_field, escaped_pk, placeholder
+    );
+    sqlx::query(&sql).bind(id).execute(executor).await?;
+    Ok(())
 }
 
-// 使用宏生成不同数据库版本的 soft_delete_by_id 函数
-impl_soft_delete_by_id_for_db!(
-    "mysql",
-    sqlx::MySql,
-    crate::db_pool::DbDriver::MySql,
-    "?",
-    soft_delete_by_id_mysql
-);
-
-impl_soft_delete_by_id_for_db!(
-    "postgres",
-    sqlx::Postgres,
-    crate::db_pool::DbDriver::Postgres,
-    "$1",
-    soft_delete_by_id_postgres
-);
-
-impl_soft_delete_by_id_for_db!(
-    "sqlite",
-    sqlx::Sqlite,
-    crate::db_pool::DbDriver::Sqlite,
-    "?",
-    soft_delete_by_id_sqlite
-);
+/// 根据 ID 删除记录（泛型版本）
+///
+/// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+/// 如果模型定义了 `SOFT_DELETE_FIELD`，则使用逻辑删除；否则使用物理删除。
+///
+/// # 类型参数
+///
+/// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+/// * `M` - 模型类型，必须实现 `Model` trait
+/// * `E` - 执行器类型，可以是连接池或事务
+///
+/// # 参数
+///
+/// * `executor` - 数据库执行器（连接池或事务）
+/// * `id` - 主键 ID 值
+///
+/// # 返回值
+///
+/// 删除成功返回 `Ok(())`
+///
+/// # 示例
+///
+/// ```rust,ignore
+/// use sqlxplus::{DatabaseInfo, crud};
+///
+/// // MySQL
+/// crud::delete_by_id::<sqlx::MySql, User, _>(pool, 1).await?;
+///
+/// // PostgreSQL
+/// crud::delete_by_id::<sqlx::Postgres, User, _>(pool, 1).await?;
+///
+/// // SQLite
+/// crud::delete_by_id::<sqlx::Sqlite, User, _>(pool, 1).await?;
+/// ```
+pub async fn delete_by_id<'e, 'c: 'e, DB, M, E>(
+    executor: E,
+    id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+) -> Result<()>
+where
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+    M: Model,
+    E: sqlx::Executor<'c, Database = DB> + Send,
+{
+    if M::SOFT_DELETE_FIELD.is_some() {
+        soft_delete_by_id::<DB, M, E>(executor, id).await
+    } else {
+        hard_delete_by_id::<DB, M, E>(executor, id).await
+    }
+}
