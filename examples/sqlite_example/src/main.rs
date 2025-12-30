@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let builder = QueryBuilder::new("SELECT * FROM user")
         .and_eq("id", id1)
         .order_by("id", false);
-    let one_user = User::find_one_sqlite(pool.sqlite_pool(), builder).await?;
+    let one_user = User::find_one::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder).await?;
     println!(
         "find_one 结果: {:?}\n",
         one_user.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     // ========== 5. COUNT (统计记录数量) ==========
     println!("=== 5. COUNT (统计记录数量) ===");
     let builder = QueryBuilder::new("SELECT * FROM user");
-    let total = User::count_sqlite(pool.sqlite_pool(), builder).await?;
+    let total = User::count::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder).await?;
     println!("未删除的记录数: {}\n", total);
 
     // ========== 6. UPDATE (更新 - Patch 语义) ==========
@@ -107,13 +107,13 @@ async fn main() -> anyhow::Result<()> {
     // ========== 8. FIND_ALL (查询所有记录) ==========
     println!("=== 8. FIND_ALL (查询所有记录) ===");
     let builder = QueryBuilder::new("SELECT * FROM user").order_by("id", false);
-    let all_users = User::find_all_sqlite(pool.sqlite_pool(), Some(builder)).await?;
+    let all_users = User::find_all::<sqlx::Sqlite, _>(pool.sqlite_pool(), Some(builder)).await?;
     println!("find_all 返回 {} 条记录\n", all_users.len());
 
     // ========== 9. PAGINATE (分页查询) ==========
     println!("=== 9. PAGINATE (分页查询) ===");
     let builder = QueryBuilder::new("SELECT * FROM user").order_by("id", false);
-    let page = User::paginate_sqlite(pool.sqlite_pool(), builder, 1, 10).await?;
+    let page = User::paginate::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder, 1, 10).await?;
     println!(
         "分页结果: 总数={}, 当前页={} 条\n",
         page.total,
@@ -151,23 +151,23 @@ async fn main() -> anyhow::Result<()> {
 
     // AND 条件
     let builder = QueryBuilder::new("SELECT * FROM user").and_gt("id", 0);
-    let count = User::count_sqlite(pool.sqlite_pool(), builder).await?;
+    let count = User::count::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder).await?;
     println!("AND 条件查询: {} 条记录", count);
 
     // LIKE 查询
     let builder = QueryBuilder::new("SELECT * FROM user")
         .and_like("username", &format!("user1_{}", timestamp));
-    let count = User::count_sqlite(pool.sqlite_pool(), builder).await?;
+    let count = User::count::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder).await?;
     println!("LIKE 查询: {} 条记录", count);
 
     // IN 查询
     let builder = QueryBuilder::new("SELECT * FROM user").and_in("id", vec![id1, id2]);
-    let count = User::count_sqlite(pool.sqlite_pool(), builder).await?;
+    let count = User::count::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder).await?;
     println!("IN 查询: {} 条记录", count);
 
     // BETWEEN 查询
     let builder = QueryBuilder::new("SELECT * FROM user").and_between("id", id1, id3);
-    let count = User::count_sqlite(pool.sqlite_pool(), builder).await?;
+    let count = User::count::<sqlx::Sqlite, _>(pool.sqlite_pool(), builder).await?;
     println!("BETWEEN 查询: {} 条记录", count);
 
     println!();
@@ -281,7 +281,8 @@ async fn main() -> anyhow::Result<()> {
 
             // 在事务中查询记录
             let count_builder = QueryBuilder::new("SELECT * FROM user").and_eq("id", closure_id);
-            let count = User::count_sqlite(tx.as_sqlite_executor(), count_builder).await?;
+            let count =
+                User::count::<sqlx::Sqlite, _>(tx.as_sqlite_executor(), count_builder).await?;
             println!("闭包事务中查询记录数: {}", count);
 
             // 返回成功，事务会自动提交
@@ -388,7 +389,7 @@ async fn main() -> anyhow::Result<()> {
 
             // 统计记录数
             let builder = QueryBuilder::new("SELECT * FROM user").and_in("id", vec![id1, id2]);
-            let count = User::count_sqlite(tx.as_sqlite_executor(), builder).await?;
+            let count = User::count::<sqlx::Sqlite, _>(tx.as_sqlite_executor(), builder).await?;
             println!("统计记录数: {}", count);
 
             // 返回两个 ID

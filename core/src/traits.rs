@@ -5,48 +5,6 @@ use crate::query_builder::QueryBuilder;
 /// 主键 ID 类型
 pub type Id = i64;
 
-/// 宏：为 Crud trait 生成 find_all 方法
-macro_rules! impl_find_all {
-    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = $feature)]
-        async fn $crud_fn<'e, 'c: 'e, E>(
-            executor: E,
-            builder: Option<QueryBuilder>,
-        ) -> Result<Vec<Self>>
-        where
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            crate::crud::$crud_fn(executor, builder).await
-        }
-    };
-}
-
-/// 宏：为 Crud trait 生成 find_one 方法
-macro_rules! impl_find_one {
-    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = $feature)]
-        async fn $crud_fn<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
-        where
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            crate::crud::$crud_fn(executor, builder).await
-        }
-    };
-}
-
-/// 宏：为 Crud trait 生成 count 方法
-macro_rules! impl_count {
-    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = $feature)]
-        async fn $crud_fn<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<u64>
-        where
-            E: sqlx::Executor<'c, Database = $db_type> + Send,
-        {
-            crate::crud::$crud_fn::<Self, E>(executor, builder).await
-        }
-    };
-}
-
 /// 宏：为 Crud trait 生成 hard_delete_by_id 方法
 macro_rules! impl_hard_delete_by_id {
     ($feature:literal, $db_type:ty, $crud_fn:ident) => {
@@ -95,24 +53,6 @@ macro_rules! impl_delete_by_id {
             } else {
                 Self::$hard_fn(executor, id).await
             }
-        }
-    };
-}
-
-/// 宏：为 Crud trait 生成 paginate 方法
-macro_rules! impl_paginate {
-    ($feature:literal, $db_type:ty, $crud_fn:ident) => {
-        #[cfg(feature = $feature)]
-        async fn $crud_fn<'e, 'c: 'e, E>(
-            executor: E,
-            builder: QueryBuilder,
-            page: u64,
-            size: u64,
-        ) -> Result<Page<Self>>
-        where
-            E: sqlx::Executor<'c, Database = $db_type> + Send + Clone,
-        {
-            crate::crud::$crud_fn::<Self, E>(executor, builder, page, size).await
         }
     };
 }
@@ -292,17 +232,204 @@ pub trait Crud:
         crate::crud::find_by_ids::<DB, Self, I, E>(executor, ids).await
     }
 
-    impl_find_all!("mysql", sqlx::MySql, find_all_mysql);
-    impl_find_all!("postgres", sqlx::Postgres, find_all_postgres);
-    impl_find_all!("sqlite", sqlx::Sqlite, find_all_sqlite);
+    /// 根据查询构建器查找单条记录（泛型版本）
+    ///
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`User::find_one::<sqlx::MySql, _>(pool, builder)`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // MySQL
+    /// let builder = QueryBuilder::new("SELECT * FROM user").and_eq("id", 1);
+    /// let user = User::find_one::<sqlx::MySql, _>(pool, builder).await?;
+    ///
+    /// // PostgreSQL
+    /// let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_eq("id", 1);
+    /// let user = User::find_one::<sqlx::Postgres, _>(pool, builder).await?;
+    ///
+    /// // SQLite
+    /// let builder = QueryBuilder::new("SELECT * FROM user").and_eq("id", 1);
+    /// let user = User::find_one::<sqlx::Sqlite, _>(pool, builder).await?;
+    /// ```
+    async fn find_one<'e, 'c: 'e, DB, E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
+    where
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        Self: for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    {
+        crate::crud::find_one::<DB, Self, E>(executor, builder).await
+    }
 
-    impl_find_one!("mysql", sqlx::MySql, find_one_mysql);
-    impl_find_one!("postgres", sqlx::Postgres, find_one_postgres);
-    impl_find_one!("sqlite", sqlx::Sqlite, find_one_sqlite);
+    /// 根据查询构建器查找所有记录（泛型版本）
+    ///
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`User::find_all::<sqlx::MySql, _>(pool, None)`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // MySQL - 查询所有记录
+    /// let users = User::find_all::<sqlx::MySql, _>(pool, None).await?;
+    ///
+    /// // PostgreSQL - 使用查询构建器
+    /// let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_eq("status", 1);
+    /// let users = User::find_all::<sqlx::Postgres, _>(pool, Some(builder)).await?;
+    ///
+    /// // SQLite
+    /// let users = User::find_all::<sqlx::Sqlite, _>(pool, None).await?;
+    /// ```
+    async fn find_all<'e, 'c: 'e, DB, E>(
+        executor: E,
+        builder: Option<QueryBuilder>,
+    ) -> Result<Vec<Self>>
+    where
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        Self: for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    {
+        crate::crud::find_all::<DB, Self, E>(executor, builder).await
+    }
 
-    impl_count!("mysql", sqlx::MySql, count_mysql);
-    impl_count!("postgres", sqlx::Postgres, count_postgres);
-    impl_count!("sqlite", sqlx::Sqlite, count_sqlite);
+    /// 统计记录数量（泛型版本）
+    ///
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`User::count::<sqlx::MySql, _>(pool, builder)`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // MySQL
+    /// let builder = QueryBuilder::new("SELECT * FROM user");
+    /// let count = User::count::<sqlx::MySql, _>(pool, builder).await?;
+    ///
+    /// // PostgreSQL
+    /// let builder = QueryBuilder::new("SELECT * FROM \"user\"");
+    /// let count = User::count::<sqlx::Postgres, _>(pool, builder).await?;
+    ///
+    /// // SQLite
+    /// let builder = QueryBuilder::new("SELECT * FROM user");
+    /// let count = User::count::<sqlx::Sqlite, _>(pool, builder).await?;
+    /// ```
+    async fn count<'e, 'c: 'e, DB, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+    where
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // i64 还需要实现 Decode<DB>（用于从查询结果中读取）
+        // usize 需要实现 ColumnIndex<DB::Row>（用于通过索引访问列）
+        // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB> + for<'r> sqlx::Decode<'r, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        usize: sqlx::ColumnIndex<DB::Row>,
+    {
+        crate::crud::count::<DB, Self, E>(executor, builder).await
+    }
+
+    /// 分页查询（泛型版本）
+    ///
+    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+    /// 调用时需要指定数据库类型参数，例如：`User::paginate::<sqlx::MySql, _>(pool, builder, 1, 10)`
+    ///
+    /// # 类型参数
+    ///
+    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
+    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断），需要实现 `Clone`
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // MySQL
+    /// let builder = QueryBuilder::new("SELECT * FROM user");
+    /// let page = User::paginate::<sqlx::MySql, _>(pool, builder, 1, 10).await?;
+    ///
+    /// // PostgreSQL
+    /// let builder = QueryBuilder::new("SELECT * FROM \"user\"");
+    /// let page = User::paginate::<sqlx::Postgres, _>(pool, builder, 1, 10).await?;
+    ///
+    /// // SQLite
+    /// let builder = QueryBuilder::new("SELECT * FROM user");
+    /// let page = User::paginate::<sqlx::Sqlite, _>(pool, builder, 1, 10).await?;
+    /// ```
+    async fn paginate<'e, 'c: 'e, DB, E>(
+        executor: E,
+        builder: QueryBuilder,
+        page: u64,
+        size: u64,
+    ) -> Result<Page<Self>>
+    where
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        Self: for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+        E: sqlx::Executor<'c, Database = DB> + Send + Clone,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // i64 还需要实现 Decode<DB>（用于从查询结果中读取）
+        // usize 需要实现 ColumnIndex<DB::Row>（用于通过索引访问列）
+        // 虽然 sqlx 已经为这些类型实现了这些 trait，但在泛型上下文中需要显式声明
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB> + for<'r> sqlx::Decode<'r, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        usize: sqlx::ColumnIndex<DB::Row>,
+    {
+        crate::crud::paginate::<DB, Self, E>(executor, builder, page, size).await
+    }
 
     impl_hard_delete_by_id!("mysql", sqlx::MySql, hard_delete_by_id_mysql);
     impl_hard_delete_by_id!("postgres", sqlx::Postgres, hard_delete_by_id_postgres);
@@ -333,8 +460,4 @@ pub trait Crud:
         soft_delete_by_id_sqlite,
         hard_delete_by_id_sqlite
     );
-
-    impl_paginate!("mysql", sqlx::MySql, paginate_mysql);
-    impl_paginate!("postgres", sqlx::Postgres, paginate_postgres);
-    impl_paginate!("sqlite", sqlx::Sqlite, paginate_sqlite);
 }
