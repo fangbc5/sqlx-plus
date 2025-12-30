@@ -169,39 +169,44 @@ pub trait Crud:
         serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
-    /// 根据 ID 查找单条记录（泛型版本）
+    /// 根据 ID 查找单条记录
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
-    /// 调用时需要指定数据库类型参数，例如：`User::find_by_id::<sqlx::MySql, _>(pool, id)`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// let user = User::find_by_id::<sqlx::MySql, _>(pool, 1).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let user = User::find_by_id(pool.mysql_pool(), 1).await?;
     ///
-    /// // PostgreSQL
-    /// let user = User::find_by_id::<sqlx::Postgres, _>(pool, 1).await?;
-    ///
-    /// // SQLite
-    /// let user = User::find_by_id::<sqlx::Sqlite, _>(pool, 1).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let user = User::find_by_id(tx.as_mysql_executor(), 1).await?;
     /// ```
-    async fn find_by_id<'e, 'c: 'e, DB, E>(
+    async fn find_by_id<'e, 'c: 'e, E>(
         executor: E,
-        id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
     ) -> Result<Option<Self>>
     where
-        DB: sqlx::Database + crate::database_info::DatabaseInfo,
-        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        Self: for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
     {
-        crate::crud::find_by_id::<DB, Self, E>(executor, id).await
+        crate::crud::find_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 
     /// 根据多个 ID 查找记录（泛型版本）

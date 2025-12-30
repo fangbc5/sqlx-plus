@@ -1,5 +1,6 @@
 pub mod crud;
 pub mod database_info;
+pub mod database_type;
 pub mod db_pool;
 pub mod error;
 pub mod executor;
@@ -10,6 +11,7 @@ pub mod transaction;
 pub mod utils;
 
 pub use database_info::DatabaseInfo;
+pub use database_type::DatabaseType;
 pub use db_pool::{DbDriver, DbPool};
 pub use query_builder::QueryBuilder;
 pub use traits::{Crud, Model};

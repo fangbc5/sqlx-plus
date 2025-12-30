@@ -54,7 +54,8 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
     println!("=== 2. FIND_BY_ID (根据 ID 查找) ===");
-    let found = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id1).await?;
+    // 使用自动类型推断版本（无需显式指定数据库类型）
+    let found = User::find_by_id(pool.mysql_pool(), id1).await?;
     println!(
         "找到用户: {:?}\n",
         found.map(|u| format!("ID={:?}, username={:?}", u.id, u.username))
@@ -89,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 6. UPDATE (更新 - Patch 语义) ==========
     println!("=== 6. UPDATE (更新 - Patch 语义) ===");
-    if let Some(mut user) = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id1).await? {
+    if let Some(mut user) = User::find_by_id(pool.mysql_pool(), id1).await? {
         user.email = Some(format!("updated_{}@example.com", timestamp));
         user.system_type = Some(2i16);
         user.update::<sqlx::MySql, _>(pool.mysql_pool()).await?;
@@ -98,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ==========
     println!("=== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ===");
-    if let Some(mut user) = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id1).await? {
+    if let Some(mut user) = User::find_by_id(pool.mysql_pool(), id1).await? {
         user.system_type = None;
         user.update_with_none::<sqlx::MySql, _>(pool.mysql_pool())
             .await?;
@@ -127,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     println!("逻辑删除 ID={} 成功", id2);
 
     // 验证逻辑删除后 find_by_id 返回 None
-    let deleted = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id2).await?;
+    let deleted = User::find_by_id(pool.mysql_pool(), id2).await?;
     if deleted.is_none() {
         println!("验证成功：逻辑删除后 find_by_id 返回 None\n");
     } else {
@@ -140,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
     println!("物理删除 ID={} 成功", id3);
 
     // 验证物理删除后记录不存在
-    let deleted = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), id3).await?;
+    let deleted = User::find_by_id(pool.mysql_pool(), id3).await?;
     if deleted.is_none() {
         println!("验证成功：物理删除后记录不存在\n");
     } else {
@@ -193,9 +194,7 @@ async fn main() -> anyhow::Result<()> {
         println!("事务中插入记录，ID: {}", tx_id1);
 
         // 在事务中更新记录
-        if let Some(mut user) =
-            User::find_by_id::<sqlx::MySql, _>(tx.as_mysql_executor(), tx_id1).await?
-        {
+        if let Some(mut user) = User::find_by_id(tx.as_mysql_executor(), tx_id1).await? {
             user.email = Some(format!("tx_updated_{}@example.com", timestamp));
             user.update::<sqlx::MySql, _>(tx.as_mysql_executor())
                 .await?;
@@ -207,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
         println!("事务提交成功");
 
         // 验证事务提交后的数据
-        let committed_user = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), tx_id1).await?;
+        let committed_user = User::find_by_id(pool.mysql_pool(), tx_id1).await?;
         if let Some(user) = committed_user {
             println!(
                 "验证成功：事务提交后可以查询到记录，email: {:?}\n",
@@ -238,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
         println!("事务中插入记录，ID: {}", tx_id2);
 
         // 在事务中查询记录（应该能查到）
-        let tx_user = User::find_by_id::<sqlx::MySql, _>(tx.as_mysql_executor(), tx_id2).await?;
+        let tx_user = User::find_by_id(tx.as_mysql_executor(), tx_id2).await?;
         if tx_user.is_some() {
             println!("事务中可以查询到记录");
         }
@@ -250,8 +249,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // 验证事务回滚后的数据（应该查询不到）
-    let rolled_back_user =
-        User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), rollback_id).await?;
+    let rolled_back_user = User::find_by_id(pool.mysql_pool(), rollback_id).await?;
     if rolled_back_user.is_none() {
         println!("验证成功：事务回滚后记录不存在\n");
     } else {
@@ -277,9 +275,9 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
             println!("闭包事务中插入记录，ID: {}", closure_id);
 
-            // 在事务中更新记录
-            let user_opt =
-                User::find_by_id::<sqlx::MySql, _>(tx.as_mysql_executor(), closure_id).await?;
+            // 在事务中更新记录（使用自动类型推断）
+            // 注意：需要使用 as_mysql_executor() 而不是 as_mysql_transaction()
+            let user_opt = User::find_by_id(tx.as_mysql_executor(), closure_id).await?;
             if let Some(mut user) = user_opt {
                 user.email = Some(format!("closure_updated_{}@example.com", timestamp));
                 user.update::<sqlx::MySql, _>(tx.as_mysql_executor())
@@ -301,7 +299,7 @@ async fn main() -> anyhow::Result<()> {
     println!("闭包事务提交成功，返回 ID: {}", closure_id);
 
     // 验证闭包事务提交后的数据
-    let closure_user = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), closure_id).await?;
+    let closure_user = User::find_by_id(pool.mysql_pool(), closure_id).await?;
     if let Some(user) = closure_user {
         println!(
             "验证成功：闭包事务提交后可以查询到记录，email: {:?}\n",
@@ -332,8 +330,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("闭包事务中插入记录，ID: {}", rollback_id);
 
                 // 在事务中查询记录（应该能查到）
-                let tx_user =
-                    User::find_by_id::<sqlx::MySql, _>(tx.as_mysql_executor(), rollback_id).await?;
+                let tx_user = User::find_by_id(tx.as_mysql_executor(), rollback_id).await?;
                 if tx_user.is_some() {
                     println!("闭包事务中可以查询到记录");
                 }
@@ -386,7 +383,7 @@ async fn main() -> anyhow::Result<()> {
             println!("插入第二条记录，ID: {}", id2);
 
             // 更新第一条记录
-            let u_opt = User::find_by_id::<sqlx::MySql, _>(tx.as_mysql_executor(), id1).await?;
+            let u_opt = User::find_by_id(tx.as_mysql_executor(), id1).await?;
             if let Some(mut u) = u_opt {
                 u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
                 u.update::<sqlx::MySql, _>(tx.as_mysql_executor()).await?;
@@ -414,8 +411,8 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 验证复杂事务提交后的数据
-    let complex_user1 = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), complex_id1).await?;
-    let complex_user2 = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), complex_id2).await?;
+    let complex_user1 = User::find_by_id(pool.mysql_pool(), complex_id1).await?;
+    let complex_user2 = User::find_by_id(pool.mysql_pool(), complex_id2).await?;
     if complex_user1.is_some() && complex_user2.is_some() {
         println!("验证成功：复杂事务提交后两条记录都存在\n");
     } else {
@@ -460,11 +457,8 @@ async fn main() -> anyhow::Result<()> {
                     println!("子事务中插入记录，ID: {}", nested_id);
 
                     // 在子事务中查询记录
-                    let nested_found = User::find_by_id::<sqlx::MySql, _>(
-                        nested_tx.as_mysql_executor(),
-                        nested_id,
-                    )
-                    .await?;
+                    let nested_found =
+                        User::find_by_id(nested_tx.as_mysql_executor(), nested_id).await?;
                     if nested_found.is_some() {
                         println!("子事务中可以查询到记录");
                     }
@@ -477,8 +471,7 @@ async fn main() -> anyhow::Result<()> {
             println!("子事务成功，保存点已释放");
 
             // 在父事务中验证子事务插入的记录
-            let nested_found =
-                User::find_by_id::<sqlx::MySql, _>(tx.as_mysql_executor(), nested_id).await?;
+            let nested_found = User::find_by_id(tx.as_mysql_executor(), nested_id).await?;
             if nested_found.is_some() {
                 println!("父事务中可以查询到子事务插入的记录");
             }
@@ -490,7 +483,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     // 验证子事务提交后的数据
-    let nested_user = User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), nested_id).await?;
+    let nested_user = User::find_by_id(pool.mysql_pool(), nested_id).await?;
     if nested_user.is_some() {
         println!("验证成功：子事务提交后记录存在\n");
     } else {
@@ -535,11 +528,8 @@ async fn main() -> anyhow::Result<()> {
                     println!("子事务中插入记录，ID: {}", nested_id);
 
                     // 在子事务中查询记录（应该能查到）
-                    let nested_found = User::find_by_id::<sqlx::MySql, _>(
-                        nested_tx.as_mysql_executor(),
-                        nested_id,
-                    )
-                    .await?;
+                    let nested_found =
+                        User::find_by_id(nested_tx.as_mysql_executor(), nested_id).await?;
                     if nested_found.is_some() {
                         println!("子事务中可以查询到记录");
                     }
@@ -574,8 +564,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     // 验证父事务提交后的数据（子事务的记录应该不存在）
-    let parent_user =
-        User::find_by_id::<sqlx::MySql, _>(pool.mysql_pool(), parent_id_final).await?;
+    let parent_user = User::find_by_id(pool.mysql_pool(), parent_id_final).await?;
     if parent_user.is_some() {
         println!("验证成功：父事务提交后，父事务中的记录存在");
     } else {
