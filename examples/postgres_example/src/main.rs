@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id1 = user1.insert::<sqlx::Postgres, _>(pool.pg_pool()).await?;
+    let id1 = user1.insert(pool.pg_pool()).await?;
     println!("插入成功，ID: {}\n", id1);
 
     let user2 = User {
@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id2 = user2.insert::<sqlx::Postgres, _>(pool.pg_pool()).await?;
+    let id2 = user2.insert(pool.pg_pool()).await?;
     println!("插入成功，ID: {}\n", id2);
 
     let user3 = User {
@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id3 = user3.insert::<sqlx::Postgres, _>(pool.pg_pool()).await?;
+    let id3 = user3.insert(pool.pg_pool()).await?;
     println!("插入成功，ID: {}\n", id3);
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
@@ -63,8 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 3. FIND_BY_IDS (根据多个 ID 查找) ==========
     println!("=== 3. FIND_BY_IDS (根据多个 ID 查找) ===");
-    let users =
-        User::find_by_ids(pool.pg_pool(), vec![id1, id2, id3]).await?;
+    let users = User::find_by_ids(pool.pg_pool(), vec![id1, id2, id3]).await?;
     println!("找到 {} 条记录:", users.len());
     for user in &users {
         println!("  ID={:?}, username={:?}", user.id, user.username);
@@ -93,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(mut user) = User::find_by_id(pool.pg_pool(), id1).await? {
         user.email = Some(format!("updated_{}@example.com", timestamp));
         user.system_type = Some(2i16);
-        user.update::<sqlx::Postgres, _>(pool.pg_pool()).await?;
+        user.update(pool.pg_pool()).await?;
         println!("更新成功（Patch 语义：None 字段不更新）\n");
     }
 
@@ -101,8 +100,7 @@ async fn main() -> anyhow::Result<()> {
     println!("=== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ===");
     if let Some(mut user) = User::find_by_id(pool.pg_pool(), id1).await? {
         user.system_type = None;
-        user.update_with_none::<sqlx::Postgres, _>(pool.pg_pool())
-            .await?;
+        user.update_with_none(pool.pg_pool()).await?;
         println!("更新成功（Reset 语义：None 字段重置为默认值）\n");
     }
 
@@ -124,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 10. SOFT_DELETE (逻辑删除) ==========
     println!("=== 10. SOFT_DELETE (逻辑删除) ===");
-    User::soft_delete_by_id::<sqlx::Postgres, _>(pool.pg_pool(), id2).await?;
+    User::soft_delete_by_id(pool.pg_pool(), id2).await?;
     println!("逻辑删除 ID={} 成功", id2);
 
     // 验证逻辑删除后 find_by_id 返回 None
@@ -137,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 11. HARD_DELETE (物理删除) ==========
     println!("=== 11. HARD_DELETE (物理删除) ===");
-    User::hard_delete_by_id::<sqlx::Postgres, _>(pool.pg_pool(), id3).await?;
+    User::hard_delete_by_id(pool.pg_pool(), id3).await?;
     println!("物理删除 ID={} 成功", id3);
 
     // 验证物理删除后记录不存在
@@ -188,18 +186,13 @@ async fn main() -> anyhow::Result<()> {
             is_del: Some(0i16),
             ..Default::default()
         };
-        let tx_id1 = tx_user1
-            .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-            .await?;
+        let tx_id1 = tx_user1.insert(tx.as_postgres_executor()).await?;
         println!("事务中插入记录，ID: {}", tx_id1);
 
         // 在事务中更新记录
-        if let Some(mut user) =
-            User::find_by_id(tx.as_postgres_executor(), tx_id1).await?
-        {
+        if let Some(mut user) = User::find_by_id(tx.as_postgres_executor(), tx_id1).await? {
             user.email = Some(format!("tx_updated_{}@example.com", timestamp));
-            user.update::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                .await?;
+            user.update(tx.as_postgres_executor()).await?;
             println!("事务中更新记录成功");
         }
 
@@ -233,14 +226,11 @@ async fn main() -> anyhow::Result<()> {
             is_del: Some(0i16),
             ..Default::default()
         };
-        let tx_id2 = tx_user2
-            .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-            .await?;
+        let tx_id2 = tx_user2.insert(tx.as_postgres_executor()).await?;
         println!("事务中插入记录，ID: {}", tx_id2);
 
         // 在事务中查询记录（应该能查到）
-        let tx_user =
-            User::find_by_id(tx.as_postgres_executor(), tx_id2).await?;
+        let tx_user = User::find_by_id(tx.as_postgres_executor(), tx_id2).await?;
         if tx_user.is_some() {
             println!("事务中可以查询到记录");
         }
@@ -252,8 +242,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // 验证事务回滚后的数据（应该查询不到）
-    let rolled_back_user =
-        User::find_by_id(pool.pg_pool(), rollback_id).await?;
+    let rolled_back_user = User::find_by_id(pool.pg_pool(), rollback_id).await?;
     if rolled_back_user.is_none() {
         println!("验证成功：事务回滚后记录不存在\n");
     } else {
@@ -274,28 +263,21 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let closure_id = closure_user
-                .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                .await?;
+            let closure_id = closure_user.insert(tx.as_postgres_executor()).await?;
             println!("闭包事务中插入记录，ID: {}", closure_id);
 
             // 在事务中更新记录
-            let user_opt =
-                User::find_by_id(tx.as_postgres_executor(), closure_id)
-                    .await?;
+            let user_opt = User::find_by_id(tx.as_postgres_executor(), closure_id).await?;
             if let Some(mut user) = user_opt {
                 user.email = Some(format!("closure_updated_{}@example.com", timestamp));
-                user.update::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                    .await?;
+                user.update(tx.as_postgres_executor()).await?;
                 println!("闭包事务中更新记录成功");
             }
 
             // 在事务中查询记录
             let count_builder =
                 QueryBuilder::new("SELECT * FROM \"user\"").and_eq("id", closure_id);
-            let count = {
-                User::count(tx.as_postgres_executor(), count_builder).await?
-            };
+            let count = { User::count(tx.as_postgres_executor(), count_builder).await? };
             println!("闭包事务中查询记录数: {}", count);
 
             // 返回成功，事务会自动提交
@@ -331,15 +313,11 @@ async fn main() -> anyhow::Result<()> {
                     is_del: Some(0i16),
                     ..Default::default()
                 };
-                let rollback_id = rollback_user
-                    .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                    .await?;
+                let rollback_id = rollback_user.insert(tx.as_postgres_executor()).await?;
                 println!("闭包事务中插入记录，ID: {}", rollback_id);
 
                 // 在事务中查询记录（应该能查到）
-                let tx_user =
-                    User::find_by_id(tx.as_postgres_executor(), rollback_id)
-                        .await?;
+                let tx_user = User::find_by_id(tx.as_postgres_executor(), rollback_id).await?;
                 if tx_user.is_some() {
                     println!("闭包事务中可以查询到记录");
                 }
@@ -373,9 +351,7 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let id1 = user1
-                .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                .await?;
+            let id1 = user1.insert(tx.as_postgres_executor()).await?;
             println!("插入第一条记录，ID: {}", id1);
 
             // 插入第二条记录
@@ -386,31 +362,25 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let id2 = user2
-                .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                .await?;
+            let id2 = user2.insert(tx.as_postgres_executor()).await?;
             println!("插入第二条记录，ID: {}", id2);
 
             // 更新第一条记录
-            let u_opt =
-                User::find_by_id(tx.as_postgres_executor(), id1).await?;
+            let u_opt = User::find_by_id(tx.as_postgres_executor(), id1).await?;
             if let Some(mut u) = u_opt {
                 u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
-                u.update::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                    .await?;
+                u.update(tx.as_postgres_executor()).await?;
                 println!("更新第一条记录成功");
             }
 
             // 查询多条记录
             let ids = vec![id1, id2];
-            let users =
-                User::find_by_ids(tx.as_postgres_executor(), ids).await?;
+            let users = User::find_by_ids(tx.as_postgres_executor(), ids).await?;
             println!("查询到 {} 条记录", users.len());
 
             // 统计记录数
             let builder = QueryBuilder::new("SELECT * FROM \"user\"").and_in("id", vec![id1, id2]);
-            let count =
-                User::count(tx.as_postgres_executor(), builder).await?;
+            let count = User::count(tx.as_postgres_executor(), builder).await?;
             println!("统计记录数: {}", count);
 
             // 返回两个 ID
@@ -446,9 +416,7 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let parent_id = parent_user
-                .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                .await?;
+            let parent_id = parent_user.insert(tx.as_postgres_executor()).await?;
             println!("父事务中插入记录，ID: {}", parent_id);
 
             // 创建子事务（保存点）
@@ -464,17 +432,12 @@ async fn main() -> anyhow::Result<()> {
                         is_del: Some(0i16),
                         ..Default::default()
                     };
-                    let nested_id = nested_user
-                        .insert::<sqlx::Postgres, _>(nested_tx.as_postgres_executor())
-                        .await?;
+                    let nested_id = nested_user.insert(nested_tx.as_postgres_executor()).await?;
                     println!("子事务中插入记录，ID: {}", nested_id);
 
                     // 在子事务中查询记录
-                    let nested_found = User::find_by_id(
-                        nested_tx.as_postgres_executor(),
-                        nested_id,
-                    )
-                    .await?;
+                    let nested_found =
+                        User::find_by_id(nested_tx.as_postgres_executor(), nested_id).await?;
                     if nested_found.is_some() {
                         println!("子事务中可以查询到记录");
                     }
@@ -487,8 +450,7 @@ async fn main() -> anyhow::Result<()> {
             println!("子事务成功，保存点已释放");
 
             // 在父事务中验证子事务插入的记录
-            let nested_found =
-                User::find_by_id(tx.as_postgres_executor(), nested_id).await?;
+            let nested_found = User::find_by_id(tx.as_postgres_executor(), nested_id).await?;
             if nested_found.is_some() {
                 println!("父事务中可以查询到子事务插入的记录");
             }
@@ -521,9 +483,7 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let parent_id = parent_user
-                .insert::<sqlx::Postgres, _>(tx.as_postgres_executor())
-                .await?;
+            let parent_id = parent_user.insert(tx.as_postgres_executor()).await?;
             println!("父事务中插入记录，ID: {}", parent_id);
 
             // 创建子事务（保存点），但子事务会失败
@@ -539,17 +499,12 @@ async fn main() -> anyhow::Result<()> {
                         is_del: Some(0i16),
                         ..Default::default()
                     };
-                    let nested_id = nested_user
-                        .insert::<sqlx::Postgres, _>(nested_tx.as_postgres_executor())
-                        .await?;
+                    let nested_id = nested_user.insert(nested_tx.as_postgres_executor()).await?;
                     println!("子事务中插入记录，ID: {}", nested_id);
 
                     // 在子事务中查询记录（应该能查到）
-                    let nested_found = User::find_by_id(
-                        nested_tx.as_postgres_executor(),
-                        nested_id,
-                    )
-                    .await?;
+                    let nested_found =
+                        User::find_by_id(nested_tx.as_postgres_executor(), nested_id).await?;
                     if nested_found.is_some() {
                         println!("子事务中可以查询到记录");
                     }
@@ -570,8 +525,7 @@ async fn main() -> anyhow::Result<()> {
             // 注意：由于子事务回滚，nested_id 不可用，我们通过查询所有记录来验证
             let builder = QueryBuilder::new("SELECT * FROM \"user\"")
                 .and_like("username", &format!("nested_user2_{}", timestamp));
-            let count =
-                User::count(tx.as_postgres_executor(), builder).await?;
+            let count = User::count(tx.as_postgres_executor(), builder).await?;
             if count == 0 {
                 println!("验证成功：子事务回滚后，子事务中的记录不存在");
             } else {
@@ -585,8 +539,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     // 验证父事务提交后的数据（子事务的记录应该不存在）
-    let parent_user =
-        User::find_by_id(pool.pg_pool(), parent_id_final).await?;
+    let parent_user = User::find_by_id(pool.pg_pool(), parent_id_final).await?;
     if parent_user.is_some() {
         println!("验证成功：父事务提交后，父事务中的记录存在");
     } else {

@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id1 = user1.insert::<sqlx::Sqlite, _>(pool.sqlite_pool()).await?;
+    let id1 = user1.insert(pool.sqlite_pool()).await?;
     println!("插入成功，ID: {}\n", id1);
 
     let user2 = User {
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id2 = user2.insert::<sqlx::Sqlite, _>(pool.sqlite_pool()).await?;
+    let id2 = user2.insert(pool.sqlite_pool()).await?;
     println!("插入成功，ID: {}\n", id2);
 
     let user3 = User {
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         is_del: Some(0i16),
         ..Default::default()
     };
-    let id3 = user3.insert::<sqlx::Sqlite, _>(pool.sqlite_pool()).await?;
+    let id3 = user3.insert(pool.sqlite_pool()).await?;
     println!("插入成功，ID: {}\n", id3);
 
     // ========== 2. FIND_BY_ID (根据 ID 查找) ==========
@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(mut user) = User::find_by_id(pool.sqlite_pool(), id1).await? {
         user.email = Some(format!("updated_{}@example.com", timestamp));
         user.system_type = Some(2i16);
-        user.update::<sqlx::Sqlite, _>(pool.sqlite_pool()).await?;
+        user.update(pool.sqlite_pool()).await?;
         println!("更新成功（Patch 语义：None 字段不更新）\n");
     }
 
@@ -99,8 +99,7 @@ async fn main() -> anyhow::Result<()> {
     println!("=== 7. UPDATE_WITH_NONE (更新 - Reset 语义) ===");
     if let Some(mut user) = User::find_by_id(pool.sqlite_pool(), id1).await? {
         user.system_type = None;
-        user.update_with_none::<sqlx::Sqlite, _>(pool.sqlite_pool())
-            .await?;
+        user.update_with_none(pool.sqlite_pool()).await?;
         println!("更新成功（Reset 语义：None 字段重置为默认值）\n");
     }
 
@@ -122,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 10. SOFT_DELETE (逻辑删除) ==========
     println!("=== 10. SOFT_DELETE (逻辑删除) ===");
-    User::soft_delete_by_id::<sqlx::Sqlite, _>(pool.sqlite_pool(), id2).await?;
+    User::soft_delete_by_id(pool.sqlite_pool(), id2).await?;
     println!("逻辑删除 ID={} 成功", id2);
 
     // 验证逻辑删除后 find_by_id 返回 None
@@ -135,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ========== 11. HARD_DELETE (物理删除) ==========
     println!("=== 11. HARD_DELETE (物理删除) ===");
-    User::hard_delete_by_id::<sqlx::Sqlite, _>(pool.sqlite_pool(), id3).await?;
+    User::hard_delete_by_id(pool.sqlite_pool(), id3).await?;
     println!("物理删除 ID={} 成功", id3);
 
     // 验证物理删除后记录不存在
@@ -186,16 +185,13 @@ async fn main() -> anyhow::Result<()> {
             is_del: Some(0i16),
             ..Default::default()
         };
-        let tx_id1 = tx_user1
-            .insert::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-            .await?;
+        let tx_id1 = tx_user1.insert(tx.as_sqlite_executor()).await?;
         println!("事务中插入记录，ID: {}", tx_id1);
 
         // 在事务中更新记录
         if let Some(mut user) = User::find_by_id(tx.as_sqlite_executor(), tx_id1).await? {
             user.email = Some(format!("tx_updated_{}@example.com", timestamp));
-            user.update::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-                .await?;
+            user.update(tx.as_sqlite_executor()).await?;
             println!("事务中更新记录成功");
         }
 
@@ -229,9 +225,7 @@ async fn main() -> anyhow::Result<()> {
             is_del: Some(0i16),
             ..Default::default()
         };
-        let tx_id2 = tx_user2
-            .insert::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-            .await?;
+        let tx_id2 = tx_user2.insert(tx.as_sqlite_executor()).await?;
         println!("事务中插入记录，ID: {}", tx_id2);
 
         // 在事务中查询记录（应该能查到）
@@ -268,16 +262,13 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let closure_id = closure_user
-                .insert::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-                .await?;
+            let closure_id = closure_user.insert(tx.as_sqlite_executor()).await?;
             println!("闭包事务中插入记录，ID: {}", closure_id);
 
             // 在事务中更新记录
             if let Some(mut user) = User::find_by_id(tx.as_sqlite_executor(), closure_id).await? {
                 user.email = Some(format!("closure_updated_{}@example.com", timestamp));
-                user.update::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-                    .await?;
+                user.update(tx.as_sqlite_executor()).await?;
                 println!("闭包事务中更新记录成功");
             }
 
@@ -319,9 +310,7 @@ async fn main() -> anyhow::Result<()> {
                     is_del: Some(0i16),
                     ..Default::default()
                 };
-                let rollback_id = rollback_user
-                    .insert::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-                    .await?;
+                let rollback_id = rollback_user.insert(tx.as_sqlite_executor()).await?;
                 println!("闭包事务中插入记录，ID: {}", rollback_id);
 
                 // 在事务中查询记录（应该能查到）
@@ -359,9 +348,7 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let id1 = user1
-                .insert::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-                .await?;
+            let id1 = user1.insert(tx.as_sqlite_executor()).await?;
             println!("插入第一条记录，ID: {}", id1);
 
             // 插入第二条记录
@@ -372,15 +359,13 @@ async fn main() -> anyhow::Result<()> {
                 is_del: Some(0i16),
                 ..Default::default()
             };
-            let id2 = user2
-                .insert::<sqlx::Sqlite, _>(tx.as_sqlite_executor())
-                .await?;
+            let id2 = user2.insert(tx.as_sqlite_executor()).await?;
             println!("插入第二条记录，ID: {}", id2);
 
             // 更新第一条记录
             if let Some(mut u) = User::find_by_id(tx.as_sqlite_executor(), id1).await? {
                 u.email = Some(format!("complex_updated1_{}@example.com", timestamp));
-                u.update::<sqlx::Sqlite, _>(tx.as_sqlite_executor()).await?;
+                u.update(tx.as_sqlite_executor()).await?;
                 println!("更新第一条记录成功");
             }
 

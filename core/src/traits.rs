@@ -33,33 +33,24 @@ pub trait Crud:
     + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
     + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
 {
-    /// 插入记录（泛型版本）
+    /// 插入记录
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
-    /// 调用时需要指定数据库类型参数，例如：`user.insert::<sqlx::MySql, _>(pool).await?`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// let id = user.insert::<sqlx::MySql, _>(pool).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let id = user.insert(pool.mysql_pool()).await?;
     ///
-    /// // PostgreSQL
-    /// let id = user.insert::<sqlx::Postgres, _>(pool).await?;
-    ///
-    /// // SQLite
-    /// let id = user.insert::<sqlx::Sqlite, _>(pool).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let id = user.insert(tx.as_mysql_executor()).await?;
     /// ```
     async fn insert<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<Id>
     where
         DB: sqlx::Database + crate::database_info::DatabaseInfo,
         for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType<DB = DB> + sqlx::Executor<'c, Database = DB> + Send,
         // PostgreSQL 使用 query_scalar 需要这些约束
         i64: sqlx::Type<DB> + for<'r> sqlx::Decode<'r, DB>,
         usize: sqlx::ColumnIndex<DB::Row>,
@@ -77,38 +68,29 @@ pub trait Crud:
         serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
-    /// 更新记录（Patch 语义，泛型版本）
+    /// 更新记录（Patch 语义）
     ///
     /// - 非 `Option` 字段：始终参与更新，生成 `SET col = ?` 并绑定当前值。
     /// - `Option` 字段：
     ///   - `Some(v)`：生成 `SET col = ?` 并绑定 `v`；
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
-    /// 调用时需要指定数据库类型参数，例如：`user.update::<sqlx::MySql, _>(pool).await?`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// user.update::<sqlx::MySql, _>(pool).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// user.update(pool.mysql_pool()).await?;
     ///
-    /// // PostgreSQL
-    /// user.update::<sqlx::Postgres, _>(pool).await?;
-    ///
-    /// // SQLite
-    /// user.update::<sqlx::Sqlite, _>(pool).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// user.update(tx.as_mysql_executor()).await?;
     /// ```
     async fn update<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<()>
     where
         DB: sqlx::Database + crate::database_info::DatabaseInfo,
         for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType<DB = DB> + sqlx::Executor<'c, Database = DB> + Send,
         // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
         String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -123,38 +105,29 @@ pub trait Crud:
         serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
-    /// 更新记录（包含 None 字段的重置，Reset 语义，泛型版本）
+    /// 更新记录（包含 None 字段的重置，Reset 语义）
     ///
     /// - 非 Option 字段：与 `update` 相同，始终参与更新
     /// - Option 字段：
     ///   - Some(v)：更新为 v
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
-    /// 调用时需要指定数据库类型参数，例如：`user.update_with_none::<sqlx::MySql, _>(pool).await?`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// user.update_with_none::<sqlx::MySql, _>(pool).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// user.update_with_none(pool.mysql_pool()).await?;
     ///
-    /// // PostgreSQL
-    /// user.update_with_none::<sqlx::Postgres, _>(pool).await?;
-    ///
-    /// // SQLite
-    /// user.update_with_none::<sqlx::Sqlite, _>(pool).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// user.update_with_none(tx.as_mysql_executor()).await?;
     /// ```
     async fn update_with_none<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<()>
     where
         DB: sqlx::Database + crate::database_info::DatabaseInfo,
         for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType<DB = DB> + sqlx::Executor<'c, Database = DB> + Send,
         // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
         String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
         i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -484,106 +457,109 @@ pub trait Crud:
         .await
     }
 
-    /// 根据 ID 物理删除记录（泛型版本）
+    /// 根据 ID 物理删除记录
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
-    /// 调用时需要指定数据库类型参数，例如：`User::hard_delete_by_id::<sqlx::MySql, _>(pool, id)`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// User::hard_delete_by_id::<sqlx::MySql, _>(pool, 1).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// User::hard_delete_by_id(pool.mysql_pool(), 1).await?;
     ///
-    /// // PostgreSQL
-    /// User::hard_delete_by_id::<sqlx::Postgres, _>(pool, 1).await?;
-    ///
-    /// // SQLite
-    /// User::hard_delete_by_id::<sqlx::Sqlite, _>(pool, 1).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// User::hard_delete_by_id(tx.as_mysql_executor(), 1).await?;
     /// ```
-    async fn hard_delete_by_id<'e, 'c: 'e, DB, E>(
+    async fn hard_delete_by_id<'e, 'c: 'e, E>(
         executor: E,
-        id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
     ) -> Result<()>
     where
-        DB: sqlx::Database + crate::database_info::DatabaseInfo,
-        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::hard_delete_by_id::<DB, Self, E>(executor, id).await
+        crate::crud::hard_delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 
-    /// 根据 ID 逻辑删除记录（泛型版本）
+    /// 根据 ID 逻辑删除记录
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
-    /// 调用时需要指定数据库类型参数，例如：`User::soft_delete_by_id::<sqlx::MySql, _>(pool, id)`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// User::soft_delete_by_id::<sqlx::MySql, _>(pool, 1).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// User::soft_delete_by_id(pool.mysql_pool(), 1).await?;
     ///
-    /// // PostgreSQL
-    /// User::soft_delete_by_id::<sqlx::Postgres, _>(pool, 1).await?;
-    ///
-    /// // SQLite
-    /// User::soft_delete_by_id::<sqlx::Sqlite, _>(pool, 1).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// User::soft_delete_by_id(tx.as_mysql_executor(), 1).await?;
     /// ```
-    async fn soft_delete_by_id<'e, 'c: 'e, DB, E>(
+    async fn soft_delete_by_id<'e, 'c: 'e, E>(
         executor: E,
-        id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
     ) -> Result<()>
     where
-        DB: sqlx::Database + crate::database_info::DatabaseInfo,
-        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::soft_delete_by_id::<DB, Self, E>(executor, id).await
+        crate::crud::soft_delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 
-    /// 根据 ID 删除记录（泛型版本）
+    /// 根据 ID 删除记录
     ///
-    /// 使用泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
     /// 如果模型定义了 `SOFT_DELETE_FIELD`，则使用逻辑删除；否则使用物理删除。
-    /// 调用时需要指定数据库类型参数，例如：`User::delete_by_id::<sqlx::MySql, _>(pool, id)`
-    ///
-    /// # 类型参数
-    ///
-    /// * `DB` - 数据库类型（如 `sqlx::MySql`, `sqlx::Postgres`, `sqlx::Sqlite`）
-    /// * `E` - 执行器类型，通常可以省略（使用 `_` 让编译器推断）
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// // MySQL
-    /// User::delete_by_id::<sqlx::MySql, _>(pool, 1).await?;
+    /// // 使用 Pool（自动推断为 MySql）
+    /// User::delete_by_id(pool.mysql_pool(), 1).await?;
     ///
-    /// // PostgreSQL
-    /// User::delete_by_id::<sqlx::Postgres, _>(pool, 1).await?;
-    ///
-    /// // SQLite
-    /// User::delete_by_id::<sqlx::Sqlite, _>(pool, 1).await?;
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// User::delete_by_id(tx.as_mysql_executor(), 1).await?;
     /// ```
-    async fn delete_by_id<'e, 'c: 'e, DB, E>(
+    async fn delete_by_id<'e, 'c: 'e, E>(
         executor: E,
-        id: impl for<'q> sqlx::Encode<'q, DB> + sqlx::Type<DB> + Send + Sync,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
     ) -> Result<()>
     where
-        DB: sqlx::Database + crate::database_info::DatabaseInfo,
-        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-        E: sqlx::Executor<'c, Database = DB> + Send,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::delete_by_id::<DB, Self, E>(executor, id).await
+        crate::crud::delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 }

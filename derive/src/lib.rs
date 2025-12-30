@@ -293,12 +293,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
         // Trait 方法实现
         #[async_trait::async_trait]
         impl sqlxplus::Crud for #name {
-            // 泛型版本的 insert
+            // 泛型版本的 insert（自动类型推断）
             async fn insert<'e, 'c: 'e, DB, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
             where
                 DB: sqlx::Database + sqlxplus::DatabaseInfo,
                 for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-                E: sqlx::Executor<'c, Database = DB> + Send,
+                E: sqlxplus::DatabaseType<DB = DB>
+                    + sqlx::Executor<'c, Database = DB>
+                    + Send,
                 i64: sqlx::Type<DB> + for<'r> sqlx::Decode<'r, DB>,
                 usize: sqlx::ColumnIndex<DB::Row>,
                 // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
@@ -429,12 +431,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 }
             }
 
-            // 泛型版本的 update
+            // 泛型版本的 update（自动类型推断）
             async fn update<'e, 'c: 'e, DB, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 DB: sqlx::Database + sqlxplus::DatabaseInfo,
                 for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-                E: sqlx::Executor<'c, Database = DB> + Send,
+                E: sqlxplus::DatabaseType<DB = DB>
+                    + sqlx::Executor<'c, Database = DB>
+                    + Send,
                 // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
                 String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
                 i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -462,14 +466,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                 // 非 Option 字段
                 #(
-                    set_parts.push(format!("{} = {}", #update_normal_field_columns, DB::placeholder(placeholder_index)));
+                    set_parts.push(format!("{} = {}", DB::escape_identifier(#update_normal_field_columns), DB::placeholder(placeholder_index)));
                     placeholder_index += 1;
                 )*
 
                 // Option 字段
                 #(
                     if self.#update_option_field_names.is_some() {
-                        set_parts.push(format!("{} = {}", #update_option_field_columns, DB::placeholder(placeholder_index)));
+                        set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                         placeholder_index += 1;
                     }
                 )*
@@ -502,12 +506,14 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 Ok(())
             }
 
-            // 泛型版本的 update_with_none
+            // 泛型版本的 update_with_none（自动类型推断）
             async fn update_with_none<'e, 'c: 'e, DB, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
                 DB: sqlx::Database + sqlxplus::DatabaseInfo,
                 for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
-                E: sqlx::Executor<'c, Database = DB> + Send,
+                E: sqlxplus::DatabaseType<DB = DB>
+                    + sqlx::Executor<'c, Database = DB>
+                    + Send,
                 // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
                 String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
                 i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
@@ -536,7 +542,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                 // 非 Option 字段：始终更新为当前值
                 #(
-                    set_parts.push(format!("{} = {}", #update_normal_field_columns, DB::placeholder(placeholder_index)));
+                    set_parts.push(format!("{} = {}", DB::escape_identifier(#update_normal_field_columns), DB::placeholder(placeholder_index)));
                     placeholder_index += 1;
                 )*
 
@@ -546,7 +552,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         // SQLite 不支持 DEFAULT，跳过 None 字段
                         #(
                             if self.#update_option_field_names.is_some() {
-                                set_parts.push(format!("{} = {}", #update_option_field_columns, DB::placeholder(placeholder_index)));
+                                set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                                 placeholder_index += 1;
                             }
                         )*
@@ -555,10 +561,10 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         // MySQL 和 PostgreSQL 使用 DEFAULT
                         #(
                             if self.#update_option_field_names.is_some() {
-                                set_parts.push(format!("{} = {}", #update_option_field_columns, DB::placeholder(placeholder_index)));
+                                set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                                 placeholder_index += 1;
                             } else {
-                                set_parts.push(format!("{} = DEFAULT", #update_option_field_columns));
+                                set_parts.push(format!("{} = DEFAULT", DB::escape_identifier(#update_option_field_columns)));
                             }
                         )*
                     }
