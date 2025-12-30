@@ -27,6 +27,7 @@ tokio = { version = "1.40", features = ["full"] }
 ```
 
 根据你使用的数据库选择对应的 feature：
+
 - MySQL: `features = ["mysql"]`
 - PostgreSQL: `features = ["postgres"]`
 - SQLite: `features = ["sqlite"]`
@@ -97,6 +98,7 @@ struct User {
 ```
 
 **属性说明：**
+
 - `table`: 数据库表名
 - `pk`: 主键字段名（默认为 "id"）
 - `soft_delete`: 逻辑删除字段名（可选）
@@ -212,6 +214,7 @@ let builder = QueryBuilder::new("")
 ```
 
 **可用方法：**
+
 - 比较：`and_eq`, `and_ne`, `and_gt`, `and_gte`, `and_lt`, `and_lte`
 - 模糊：`and_like`, `and_not_like`
 - 范围：`and_in`, `and_not_in`, `and_between`
@@ -326,6 +329,7 @@ sqlx-plus/
 ## 示例代码
 
 查看 `examples/` 目录获取完整的示例代码：
+
 - [MySQL 示例](examples/mysql_example/src/main.rs)
 - [PostgreSQL 示例](examples/postgres_example/src/main.rs)
 - [SQLite 示例](examples/sqlite_example/src/main.rs)
