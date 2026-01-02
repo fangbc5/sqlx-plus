@@ -121,7 +121,7 @@ impl DbPool {
                         c.COLUMN_KEY = 'PRI' as is_pk,
                         CAST(c.COLUMN_DEFAULT AS CHAR) as default_value,
                         c.EXTRA LIKE '%auto_increment%' as auto_increment,
-                        c.COLUMN_COMMENT as comment
+                        CAST(c.COLUMN_COMMENT AS CHAR) as comment
                     FROM INFORMATION_SCHEMA.COLUMNS c
                     WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = ?
                     ORDER BY c.ORDINAL_POSITION
@@ -178,7 +178,7 @@ impl DbPool {
                 // 获取表注释（MySQL）
                 let table_comment = sqlx::query_scalar::<_, Option<String>>(
                     r#"
-                    SELECT TABLE_COMMENT
+                    SELECT CAST(TABLE_COMMENT AS CHAR)
                     FROM INFORMATION_SCHEMA.TABLES
                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
                     "#,
