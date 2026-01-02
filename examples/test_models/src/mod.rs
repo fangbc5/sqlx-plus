@@ -1,7 +1,5 @@
 // Auto-generated module file
 
-mod user;
+pub mod user;
 pub use user::User;
 
-mod user2;
-pub use user2::User2;

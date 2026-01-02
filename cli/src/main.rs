@@ -1,8 +1,9 @@
 mod database;
 mod generator;
+mod sql_generator;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, MultiSelect};
 use generator::TableInfo;
 use std::fs;
@@ -13,50 +14,114 @@ use std::path::PathBuf;
 #[command(about = "Code generator for sqlxplus")]
 #[command(version)]
 struct Args {
-    /// Database URL (e.g., mysql://user:pass@localhost/db)
-    #[arg(short, long)]
-    database_url: String,
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    /// Output directory for generated models
-    #[arg(short, long, default_value = "models")]
-    output: PathBuf,
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Generate Rust model code from database
+    Generate {
+        /// Database URL (e.g., mysql://user:pass@localhost/db)
+        #[arg(short, long)]
+        database_url: String,
 
-    /// Specific table names to generate (if not specified, will show interactive selection)
-    #[arg(short, long)]
-    tables: Vec<String>,
+        /// Output directory for generated models
+        #[arg(short, long, default_value = "models")]
+        output: PathBuf,
 
-    /// Generate all tables without prompting
-    #[arg(short, long)]
-    all: bool,
+        /// Specific table names to generate (if not specified, will show interactive selection)
+        #[arg(short, long)]
+        tables: Vec<String>,
 
-    /// Overwrite existing files
-    #[arg(long)]
-    overwrite: bool,
+        /// Generate all tables without prompting
+        #[arg(short, long)]
+        all: bool,
 
-    /// Dry run (don't write files)
-    #[arg(long)]
-    dry_run: bool,
+        /// Overwrite existing files
+        #[arg(long)]
+        overwrite: bool,
 
-    /// Generate serde derives
-    #[arg(long, default_value_t = true)]
-    serde: bool,
+        /// Dry run (don't write files)
+        #[arg(long)]
+        dry_run: bool,
 
-    /// Generate CRUD derives
-    #[arg(long, default_value_t = true)]
-    derive_crud: bool,
+        /// Generate serde derives
+        #[arg(long, default_value_t = true)]
+        serde: bool,
+
+        /// Generate CRUD derives
+        #[arg(long, default_value_t = true)]
+        derive_crud: bool,
+    },
+    /// Generate CREATE TABLE SQL from Rust model files
+    Sql {
+        /// Model file path (Rust file with #[model(...)] struct)
+        #[arg(short, long)]
+        model: PathBuf,
+
+        /// Database type (mysql, postgres, sqlite)
+        #[arg(short, long, default_value = "mysql")]
+        database: String,
+
+        /// Output SQL file path (if not specified, print to stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    match args.command {
+        Commands::Generate {
+            database_url,
+            output,
+            tables,
+            all,
+            overwrite,
+            dry_run,
+            serde,
+            derive_crud,
+        } => {
+            handle_generate(
+                database_url,
+                output,
+                tables,
+                all,
+                overwrite,
+                dry_run,
+                serde,
+                derive_crud,
+            )
+            .await
+        }
+        Commands::Sql {
+            model,
+            database,
+            output,
+        } => handle_sql(model, database, output),
+    }
+}
+
+async fn handle_generate(
+    database_url: String,
+    output: PathBuf,
+    tables: Vec<String>,
+    all: bool,
+    overwrite: bool,
+    dry_run: bool,
+    serde: bool,
+    derive_crud: bool,
+) -> Result<()> {
     println!("🚀 sqlx-plus CLI Code Generator");
-    println!("📦 Database URL: {}", args.database_url);
-    println!("📁 Output directory: {:?}", args.output);
+    println!("📦 Database URL: {}", database_url);
+    println!("📁 Output directory: {:?}", output);
 
     // 连接到数据库
     println!("\n🔌 Connecting to database...");
-    let pool = database::DbPool::connect(&args.database_url)
+    let pool = database::DbPool::connect(&database_url)
         .await
         .context("Failed to connect to database")?;
 
@@ -75,10 +140,10 @@ async fn main() -> Result<()> {
     println!("✅ Found {} table(s)", all_tables.len());
 
     // 确定要生成的表
-    let selected_tables = if !args.tables.is_empty() {
+    let selected_tables = if !tables.is_empty() {
         // 使用命令行指定的表
         let mut selected = Vec::new();
-        for table_name in &args.tables {
+        for table_name in &tables {
             if all_tables.contains(table_name) {
                 selected.push(table_name.clone());
             } else {
@@ -89,7 +154,7 @@ async fn main() -> Result<()> {
             anyhow::bail!("No valid tables specified");
         }
         selected
-    } else if args.all {
+    } else if all {
         // 生成所有表
         all_tables.clone()
     } else {
@@ -120,12 +185,12 @@ async fn main() -> Result<()> {
     }
 
     // 创建输出目录
-    if !args.dry_run {
-        fs::create_dir_all(&args.output).context("Failed to create output directory")?;
+    if !dry_run {
+        fs::create_dir_all(&output).context("Failed to create output directory")?;
     }
 
     // 生成代码
-    let generator = generator::CodeGenerator::new(args.serde, args.derive_crud);
+    let generator = generator::CodeGenerator::new(serde, derive_crud);
 
     let mut generated_tables: Vec<TableInfo> = Vec::new();
 
@@ -148,7 +213,7 @@ async fn main() -> Result<()> {
         // 生成模型代码
         let code = generator.generate_model(&table_info)?;
 
-        if args.dry_run {
+        if dry_run {
             println!("\n📄 Generated code for {}:\n", table_name);
             println!("{}", code);
             generated_tables.push(table_info);
@@ -157,9 +222,9 @@ async fn main() -> Result<()> {
 
         // 写入模型文件
         let file_name = format!("{}.rs", to_snake_case(table_name));
-        let file_path = args.output.join(&file_name);
+        let file_path = output.join(&file_name);
 
-        if file_path.exists() && !args.overwrite {
+        if file_path.exists() && !overwrite {
             eprintln!(
                 "⚠️  File {:?} already exists, skipping (use --overwrite to overwrite)",
                 file_path
@@ -179,11 +244,11 @@ async fn main() -> Result<()> {
     if !generated_tables.is_empty() {
         let mod_code = generator.generate_mod_rs(&generated_tables)?;
 
-        if args.dry_run {
+        if dry_run {
             println!("\n📄 Generated mod.rs preview:\n{}", mod_code);
         } else {
-            let mod_path = args.output.join("mod.rs");
-            if mod_path.exists() && !args.overwrite {
+            let mod_path = output.join("mod.rs");
+            if mod_path.exists() && !overwrite {
                 eprintln!(
                     "⚠️  File {:?} already exists, skipping mod.rs (use --overwrite to overwrite)",
                     mod_path
@@ -197,8 +262,37 @@ async fn main() -> Result<()> {
     }
 
     println!("\n✨ Code generation completed!");
-    if args.dry_run {
+    if dry_run {
         println!("   (Dry run mode - no files were written)");
+    }
+
+    Ok(())
+}
+
+fn handle_sql(model: PathBuf, database: String, output: Option<PathBuf>) -> Result<()> {
+    println!("🚀 sqlx-plus CLI SQL Generator");
+    println!("📄 Model file: {:?}", model);
+    println!("🗄️  Database: {}", database);
+
+    // 验证数据库类型
+    let db_lower = database.to_lowercase();
+    if !matches!(db_lower.as_str(), "mysql" | "postgres" | "sqlite") {
+        anyhow::bail!("Unsupported database type: {}. Supported: mysql, postgres, sqlite", database);
+    }
+
+    // 生成 SQL
+    println!("\n🔍 Parsing model file...");
+    let sql = sql_generator::SqlGenerator::generate_create_table(&model, &db_lower)
+        .context("Failed to generate SQL")?;
+
+    // 输出 SQL
+    if let Some(output_path) = output {
+        fs::write(&output_path, &sql)
+            .with_context(|| format!("Failed to write SQL file: {:?}", output_path))?;
+        println!("✅ Generated SQL file: {:?}", output_path);
+    } else {
+        println!("\n📄 Generated SQL:\n");
+        println!("{}", sql);
     }
 
     Ok(())
