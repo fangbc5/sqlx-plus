@@ -146,8 +146,17 @@ pub struct Users {
 ### 基本用法
 
 ```bash
-# 生成 MySQL SQL
+# 生成单个文件的 MySQL SQL
 sqlxplus-cli sql -m src/models/user.rs -d mysql -o sql/user_mysql.sql
+
+# 批量生成多个文件的 SQL（可多次使用 -m）
+sqlxplus-cli sql -m src/models/user.rs -m src/models/order.rs -d mysql -o sql/all_tables.sql
+
+# 扫描目录下所有 .rs 文件并生成 SQL
+sqlxplus-cli sql -D src/models -d mysql -o sql/all_tables.sql
+
+# 组合使用：指定文件 + 扫描目录
+sqlxplus-cli sql -m src/models/user.rs -D src/models -d mysql -o sql/all_tables.sql
 
 # 生成 PostgreSQL SQL
 sqlxplus-cli sql -m src/models/user.rs -d postgres -o sql/user_postgres.sql
@@ -161,9 +170,21 @@ sqlxplus-cli sql -m src/models/user.rs -d mysql
 
 ### 选项说明
 
-- `-m, --model`: Rust Model 文件路径（必需）
+- `-m, --model`: Rust Model 文件路径（可多次使用以指定多个文件）
+- `-D, --dir`: 扫描目录，自动处理目录下所有 `.rs` 文件（可选）
 - `-d, --database`: 数据库类型（`mysql`, `postgres`, `sqlite`），默认为 `mysql`
 - `-o, --output`: 输出 SQL 文件路径（可选，不指定则输出到标准输出）
+
+### 批量处理说明
+
+当批量处理多个文件时：
+
+- **自动过滤**：不符合 model 格式的文件（没有 `#[model(...)]` 属性的文件）会被自动跳过
+- **结果汇总**：处理完成后会显示：
+  - ✅ 成功处理的文件列表
+  - ⏭️ 忽略的文件列表（没有 model 结构体）
+  - ❌ 错误的文件列表（解析错误等）
+- **SQL 合并**：所有成功处理的文件的 SQL 会合并到一个输出文件中（如果指定了 `-o`）
 
 ### 支持的字段宏标注
 
@@ -295,9 +316,9 @@ COMMENT ON TABLE "user" IS '用户表';
 
 ### 类型选择规则
 
-- 如果字段为 `NULLable` 或有默认值，生成 `Option<T>`
+- 如果字段为 `NULLable`，生成 `Option<T>`
+- 如果字段有默认值，生成 `Option<T>`（因为插入时可以不手动赋值）
 - 如果字段为 `NOT NULL` 且无默认值，生成 `T`
-- `String` 类型统一使用 `Option<String>` 以保持一致性
 
 ## 使用场景
 
@@ -324,6 +345,19 @@ sqlxplus-cli sql \
   -m src/models/user.rs \
   -d mysql \
   -o migrations/001_create_user.sql
+
+# 批量生成多个表的 SQL
+sqlxplus-cli sql \
+  -m src/models/user.rs \
+  -m src/models/order.rs \
+  -d mysql \
+  -o migrations/001_create_tables.sql
+
+# 扫描整个目录生成 SQL
+sqlxplus-cli sql \
+  -D src/models \
+  -d mysql \
+  -o migrations/001_create_all_tables.sql
 ```
 
 ### 场景 3：数据库迁移
