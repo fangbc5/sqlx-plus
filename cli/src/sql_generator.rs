@@ -86,11 +86,26 @@ impl SqlGenerator {
             let mut sql_type = Self::rust_type_to_sql(&field.ty, database)?;
             
             // 如果指定了 length，更新 SQL 类型（主要用于 VARCHAR）
+            // 注意：这个检查要在 TEXT 类型判断之前，因为如果指定了 length，就不应该使用 TEXT
             if let Some(length) = column_meta.length {
                 if sql_type.starts_with("VARCHAR") {
                     sql_type = format!("VARCHAR({})", length);
                 } else if sql_type.starts_with("CHAR") {
                     sql_type = format!("CHAR({})", length);
+                }
+            } else {
+                // 对于 String 类型，如果没有指定 length 且字段名包含 "text"，使用 TEXT 类型
+                if sql_type.starts_with("VARCHAR") {
+                    let field_name_lower = field_name_str.to_lowercase();
+                    if field_name_lower.contains("text") || field_name_lower.ends_with("_text") {
+                        // 根据数据库类型选择 TEXT 类型
+                        sql_type = match database {
+                            "mysql" => "TEXT".to_string(),
+                            "postgres" => "TEXT".to_string(),
+                            "sqlite" => "TEXT".to_string(),
+                            _ => "TEXT".to_string(),
+                        };
+                    }
                 }
             }
             
@@ -111,30 +126,15 @@ impl SqlGenerator {
                 col_def.push_str(" NOT NULL");
             }
 
-            // 默认值
+            // 默认值处理
             if let Some(ref default) = column_meta.default {
-                // 如果默认值是函数调用（如 CURRENT_TIMESTAMP），直接使用
-                if default.starts_with("CURRENT_") || default.starts_with("NOW()") {
-                    col_def.push_str(&format!(" DEFAULT {}", default));
-                }
-                // 如果是空字符串，使用 '' 表示
-                else if default == "\"\"" || default == "''" || default.is_empty() {
-                    col_def.push_str(" DEFAULT ''");
-                }
-                // 如果是数字，直接使用
-                else if default.parse::<i64>().is_ok() || default.parse::<f64>().is_ok() {
-                    col_def.push_str(&format!(" DEFAULT {}", default));
-                }
-                // 其他情况作为字符串处理，需要加引号
-                else {
-                    // 如果已经是带引号的字符串，直接使用；否则添加引号
-                    if (default.starts_with('"') && default.ends_with('"')) 
-                        || (default.starts_with('\'') && default.ends_with('\'')) {
-                        col_def.push_str(&format!(" DEFAULT {}", default));
-                    } else {
-                        col_def.push_str(&format!(" DEFAULT '{}'", default));
-                    }
-                }
+                let default_sql = Self::format_default_value(
+                    default,
+                    &field.ty,
+                    &sql_type,
+                    database,
+                )?;
+                col_def.push_str(&format!(" DEFAULT {}", default_sql));
             }
 
             // 主键字段如果是自增的，添加 AUTO_INCREMENT (MySQL) 或 SERIAL (PostgreSQL)
@@ -464,6 +464,170 @@ impl SqlGenerator {
         let pk_field = pk_field.unwrap_or_else(|| "id".to_string());
 
         Ok((table_name, pk_field, soft_delete_field, table_comment))
+    }
+
+    /// 格式化默认值为 SQL 格式
+    /// 
+    /// 处理规则：
+    /// 1. 函数调用（CURRENT_TIMESTAMP, NOW()）直接使用
+    /// 2. 空字符串使用 ''
+    /// 3. 布尔类型根据数据库类型格式化：
+    ///    - PostgreSQL BOOLEAN: TRUE/FALSE
+    ///    - MySQL TINYINT(1): 0/1
+    ///    - SQLite INTEGER (bool): 0/1
+    /// 4. 数字直接使用
+    /// 5. 字符串添加引号
+    fn format_default_value(
+        default: &str,
+        rust_type: &Type,
+        sql_type: &str,
+        database: &str,
+    ) -> Result<String> {
+        // 1. 函数调用直接使用
+        if default.starts_with("CURRENT_") || default.starts_with("NOW()") {
+            return Ok(default.to_string());
+        }
+
+        // 2. 空字符串
+        if default == "\"\"" || default == "''" || default.is_empty() {
+            return Ok("''".to_string());
+        }
+
+        // 3. 布尔类型处理
+        let sql_type_upper = sql_type.to_uppercase();
+        let is_bool_rust_type = Self::is_bool_type(rust_type);
+        let is_bool_sql_type = sql_type_upper == "BOOLEAN"
+            || sql_type_upper == "TINYINT(1)"
+            || (sql_type_upper.starts_with("TINYINT") && sql_type_upper.contains("(1)"))
+            || sql_type_upper == "BIT(1)"
+            || (sql_type_upper.starts_with("BIT") && sql_type_upper.contains("(1)"))
+            || (database == "sqlite" && sql_type_upper == "INTEGER" && is_bool_rust_type);
+
+        if is_bool_rust_type || is_bool_sql_type {
+            return Ok(Self::format_boolean_default(default, sql_type, database));
+        }
+
+        // 4. 数字直接使用
+        if default.parse::<i64>().is_ok() || default.parse::<f64>().is_ok() {
+            return Ok(default.to_string());
+        }
+
+        // 5. 字符串处理
+        if (default.starts_with('"') && default.ends_with('"'))
+            || (default.starts_with('\'') && default.ends_with('\''))
+        {
+            Ok(default.to_string())
+        } else {
+            // 转义单引号
+            let escaped = default.replace('\'', "''");
+            Ok(format!("'{}'", escaped))
+        }
+    }
+
+    /// 格式化布尔类型默认值
+    /// 
+    /// 支持的输入格式：
+    /// - "0", "1"
+    /// - "false", "true", "FALSE", "TRUE"
+    /// - "b'0'", "b'1'" (PostgreSQL/MySQL 位字符串)
+    /// - "b\'0\'", "b\'1\'" (转义的位字符串)
+    /// 
+    /// 输出格式：
+    /// - PostgreSQL BOOLEAN: "FALSE" 或 "TRUE"
+    /// - MySQL TINYINT(1): "0" 或 "1"
+    /// - MySQL BIT(1): "b'0'" 或 "b'1'" (MySQL BIT 类型使用位字符串格式)
+    /// - SQLite INTEGER: "0" 或 "1"
+    fn format_boolean_default(default: &str, sql_type: &str, database: &str) -> String {
+        // 移除转义字符
+        let unescaped = default.replace("\\'", "'").replace("\\\"", "\"");
+
+        // 处理位字符串字面量 b'0' 或 b'1'
+        let cleaned = if unescaped.starts_with("b'") && unescaped.ends_with('\'') && unescaped.len() >= 4 {
+            // 提取 b'0' 或 b'1' 中的数字部分
+            unescaped[2..unescaped.len() - 1].to_string()
+        } else {
+            unescaped
+        };
+
+        // 转换为标准格式
+        let bool_value = match cleaned.as_str() {
+            "0" | "false" | "FALSE" => false,
+            "1" | "true" | "TRUE" => true,
+            _ => {
+                // 尝试解析为数字
+                if let Ok(num) = cleaned.parse::<i64>() {
+                    num != 0
+                } else {
+                    // 尝试解析为布尔字符串
+                    let upper = cleaned.to_uppercase();
+                    if upper == "TRUE" {
+                        true
+                    } else if upper == "FALSE" {
+                        false
+                    } else {
+                        eprintln!("Warning: Cannot parse boolean default value '{}', using false", default);
+                        false
+                    }
+                }
+            }
+        };
+
+        // 根据数据库类型和 SQL 类型格式化输出
+        let sql_type_upper = sql_type.to_uppercase();
+        if sql_type_upper == "BOOLEAN" && database == "postgres" {
+            // PostgreSQL BOOLEAN 使用 TRUE/FALSE
+            if bool_value {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        } else if (sql_type_upper == "BIT(1)" || (sql_type_upper.starts_with("BIT") && sql_type_upper.contains("(1)"))) && database == "mysql" {
+            // MySQL BIT(1) 使用位字符串格式 b'0' 或 b'1'
+            if bool_value {
+                "b'1'".to_string()
+            } else {
+                "b'0'".to_string()
+            }
+        } else {
+            // MySQL TINYINT(1) 和 SQLite INTEGER 使用数字 0/1
+            if bool_value {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }
+        }
+    }
+
+    /// 判断 Rust 类型是否为 bool（包括 Option<bool>）
+    fn is_bool_type(ty: &Type) -> bool {
+        match ty {
+            Type::Path(TypePath { path, .. }) => {
+                // 检查是否为 bool
+                if let Some(segment) = path.segments.last() {
+                    if segment.ident == "bool" {
+                        return true;
+                    }
+                }
+                // 检查是否为 Option<bool>
+                if let Some(segment) = path.segments.first() {
+                    if segment.ident == "Option" {
+                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                            if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                                if let Type::Path(TypePath { path: inner_path, .. }) = inner_ty {
+                                    if let Some(inner_segment) = inner_path.segments.last() {
+                                        if inner_segment.ident == "bool" {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     /// 判断是否是 Option<T> 类型

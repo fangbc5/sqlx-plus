@@ -303,6 +303,26 @@ impl CodeGenerator {
 ///   - 有默认值的字段往往在插入时可以不手动赋值，因此也按可选处理
 /// - 否则生成裸类型 `T`
 fn sql_type_to_rust(col: &ColumnInfo) -> String {
+    let sql_type_upper = col.sql_type.to_uppercase();
+    
+    // 先检查是否是布尔类型（需要在规范化之前检查，因为需要保留长度信息）
+    // MySQL 的 TINYINT(1) 和 BIT(1) 通常用作布尔类型
+    if sql_type_upper == "TINYINT(1)" 
+        || (sql_type_upper.starts_with("TINYINT") && sql_type_upper.contains("(1)"))
+        || sql_type_upper == "BIT(1)"
+        || (sql_type_upper.starts_with("BIT") && sql_type_upper.contains("(1)"))
+        || sql_type_upper == "BOOLEAN"
+        || sql_type_upper == "BOOL"
+        || (sql_type_upper == "BIT" && !sql_type_upper.contains("(")) {
+        // 布尔类型，根据可空性决定是否使用 Option
+        let needs_option = col.nullable || col.default.is_some();
+        if needs_option {
+            return "Option<bool>".to_string();
+        } else {
+            return "bool".to_string();
+        }
+    }
+    
     // 规范化 SQL 类型（移除长度限制等）
     let normalized = col
         .sql_type
@@ -330,8 +350,8 @@ fn sql_type_to_rust(col: &ColumnInfo) -> String {
         "DECIMAL" | "NUMERIC" | "DOUBLE PRECISION" | "REAL" | "DOUBLE" => "f64",
         "FLOAT" | "FLOAT4" => "f32",
         "MONEY" => "f64",
-        // 布尔类型
-        "BOOLEAN" | "BOOL" | "BIT" => "bool",
+        // 布尔类型（这里处理的是没有长度信息的 BIT 类型，已经在上面处理了 TINYINT(1) 和 BIT(1)）
+        "BOOLEAN" | "BOOL" => "bool",
         // 日期时间类型
         // MySQL 的 TIMESTAMP 是带时区的，应该使用 DateTime<Utc>
         // MySQL 的 DATETIME 是无时区的，应该使用 NaiveDateTime
