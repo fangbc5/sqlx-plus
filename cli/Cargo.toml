@@ -1,6 +1,6 @@
 [package]
 name = "sqlxplus-cli"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2021"
 authors = ["fangbc5@163.com"]
 license = "MIT OR Apache-2.0"
@@ -22,4 +22,6 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 dialoguer = "0.11"
+syn = { version = "2.0", features = ["full", "parsing"] }
+quote = "1.0"
 

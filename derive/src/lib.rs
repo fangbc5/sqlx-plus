@@ -26,7 +26,7 @@ use syn::{parse::Parser, parse_macro_input, Data, DataStruct, DeriveInput, Field
 ///     is_deleted: i32, // 逻辑删除字段：0=未删除，1=已删除
 /// }
 /// ```
-#[proc_macro_derive(ModelMeta, attributes(model))]
+#[proc_macro_derive(ModelMeta, attributes(model, column))]
 pub fn derive_model_meta(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -171,7 +171,7 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
 ///     is_deleted: i32, // 逻辑删除字段
 /// }
 /// ```
-#[proc_macro_derive(CRUD, attributes(model, skip))]
+#[proc_macro_derive(CRUD, attributes(model, skip, column))]
 pub fn derive_crud(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;

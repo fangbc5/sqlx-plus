@@ -5,6 +5,7 @@ use anyhow::Result;
 pub struct TableInfo {
     pub name: String,
     pub columns: Vec<ColumnInfo>,
+    pub table_comment: Option<String>,
 }
 
 /// 列信息
@@ -15,6 +16,11 @@ pub struct ColumnInfo {
     pub nullable: bool,
     pub is_pk: bool,
     pub default: Option<String>,
+    pub auto_increment: bool,
+    pub is_unique: bool,
+    pub has_index: bool,
+    pub comment: Option<String>,
+    pub length: Option<u32>, // 从 SQL 类型中提取的长度（如 VARCHAR(255)）
 }
 
 impl TableInfo {
@@ -92,21 +98,30 @@ impl CodeGenerator {
 
         // 生成 model 属性
         let soft_delete_field = table.detect_soft_delete_field();
+        let mut model_attrs = vec![
+            format!("table = \"{}\"", table.name),
+            format!("pk = \"{}\"", pk),
+        ];
+        
         if let Some(soft_delete) = soft_delete_field {
-            code.push_str(&format!(
-                "#[model(table = \"{}\", pk = \"{}\", soft_delete = \"{}\")]\n",
-                table.name, pk, soft_delete
-            ));
-        } else {
-            code.push_str(&format!(
-                "#[model(table = \"{}\", pk = \"{}\")]\n",
-                table.name, pk
-            ));
+            model_attrs.push(format!("soft_delete = \"{}\"", soft_delete));
         }
+        
+        if let Some(ref table_comment) = table.table_comment {
+            if !table_comment.is_empty() {
+                let escaped_comment = table_comment.replace('"', "\\\"").replace('\'', "\\'");
+                model_attrs.push(format!("table_comment = \"{}\"", escaped_comment));
+            }
+        }
+        
+        code.push_str(&format!(
+            "#[model({})]\n",
+            model_attrs.join(", ")
+        ));
 
         code.push_str(&format!("pub struct {} {{\n", to_pascal_case(&table.name)));
 
-        // 生成字段（带注释）
+        // 生成字段（带注释和宏标注）
         for col in &table.columns {
             // 生成字段注释
             code.push_str("    /// ");
@@ -132,11 +147,122 @@ impl CodeGenerator {
             code.push_str(&desc_parts.join(" | "));
             code.push_str("\n");
 
-            // 如果有默认值，也加上
+            // 如果有默认值，也加上（但 auto_increment 字段的 nextval 默认值应该忽略）
             if let Some(ref default) = col.default {
-                if default != "NULL" {
+                if default != "NULL" && !col.auto_increment {
                     code.push_str(&format!("    /// 默认值: {}\n", default));
                 }
+            }
+
+            // 生成 #[column(...)] 属性
+            let mut column_attrs = Vec::new();
+            
+            // primary_key
+            if col.is_pk {
+                column_attrs.push("primary_key".to_string());
+            }
+            
+            // auto_increment
+            if col.auto_increment {
+                column_attrs.push("auto_increment".to_string());
+            }
+            
+            // not_null
+            if !col.nullable && !col.is_pk {
+                column_attrs.push("not_null".to_string());
+            }
+            
+            // default
+            // 注意：如果字段是 auto_increment，则不需要生成 default（PostgreSQL 的 nextval 会被忽略）
+            if let Some(ref default) = col.default {
+                if default != "NULL" && !default.is_empty() && !col.auto_increment {
+                    // 处理默认值
+                    // MySQL 的默认值可能是函数调用（如 CURRENT_TIMESTAMP），需要保留
+                    // PostgreSQL 的默认值可能是函数调用（如 nextval(...)），但 auto_increment 字段应该忽略
+                    // 如果是字符串，需要加引号；如果是数字或函数，直接使用
+                    let default_str_opt = if default.starts_with("CURRENT_") 
+                        || default.starts_with("NOW()") {
+                        // 时间函数，直接使用
+                        Some(default.clone())
+                    } else if default.starts_with("nextval") {
+                        // PostgreSQL 序列，忽略（因为已经有 auto_increment）
+                        None
+                    } else if default.parse::<i64>().is_ok() || default.parse::<f64>().is_ok() {
+                        // 数字，直接使用
+                        Some(default.clone())
+                    } else {
+                        // 字符串，需要处理 PostgreSQL 的类型转换语法（如 ''::character varying）
+                        let cleaned = if default.contains("::") {
+                            // 提取引号内的内容
+                            if let Some(start) = default.find('\'') {
+                                if let Some(end) = default.rfind('\'') {
+                                    if start < end {
+                                        &default[start + 1..end]
+                                    } else {
+                                        default
+                                    }
+                                } else {
+                                    default
+                                }
+                            } else {
+                                default
+                            }
+                        } else {
+                            default
+                        };
+                        // 空字符串特殊处理
+                        if cleaned.is_empty() {
+                            Some("".to_string())  // 空字符串直接使用空字符串，不需要引号
+                        } else {
+                            Some(cleaned.replace('"', "\\\"").replace('\'', "\\'"))  // 不需要外层引号，会在 format! 中添加
+                        }
+                    };
+                    // 只有在 default_str 不为空时才添加 default 属性
+                    if let Some(default_str) = default_str_opt {
+                        // 空字符串特殊处理：直接使用 ""，其他值使用引号包裹
+                        if default_str.is_empty() {
+                            column_attrs.push("default = \"\"".to_string());
+                        } else {
+                            column_attrs.push(format!("default = \"{}\"", default_str));
+                        }
+                    }
+                }
+            }
+            
+            // length (从 SQL 类型中提取，如 VARCHAR(255))
+            if let Some(length) = col.length {
+                column_attrs.push(format!("length = {}", length));
+            }
+            
+            // unique 和 index 的处理
+            // 根据 user.rs 的逻辑：如果有 unique，应该同时有 unique 和 index
+            // 如果只有 index（没有 unique），则只有 index
+            if col.is_unique {
+                column_attrs.push("unique".to_string());
+                // unique 字段也应该有 index（根据 user.rs 的示例）
+                column_attrs.push("index".to_string());
+            } else if col.has_index {
+                // 只有普通索引，没有唯一索引
+                column_attrs.push("index".to_string());
+            }
+            
+            // soft_delete (通过字段名检测)
+            let soft_delete_field = table.detect_soft_delete_field();
+            if let Some(soft_delete) = soft_delete_field {
+                if col.name == soft_delete {
+                    column_attrs.push("soft_delete".to_string());
+                }
+            }
+            
+            // comment
+            if let Some(ref comment) = col.comment {
+                let escaped_comment = comment.replace('"', "\\\"").replace('\'', "\\'");
+                column_attrs.push(format!("comment = \"{}\"", escaped_comment));
+            }
+            
+            // 如果有 column 属性，生成 #[column(...)]
+            if !column_attrs.is_empty() {
+                code.push_str(&format!("    #[column({})]\n", column_attrs.join(", ")));
             }
 
             // 主键 id 字段强制生成为 Option<i64>，以兼容 MySQL/PostgreSQL 的 BIGINT
@@ -242,7 +368,8 @@ fn sql_type_to_rust(col: &ColumnInfo) -> String {
     };
 
     // 有默认值 或 可空 字段，统一生成为 Option<T>
-    let needs_option = col.nullable || col.default.is_some();
+    // 对于 String 类型，统一使用 Option<String> 以保持一致性（避免空值问题）
+    let needs_option = col.nullable || col.default.is_some() || base_type == "String";
 
     if needs_option {
         format!("Option<{}>", base_type)
