@@ -290,104 +290,116 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
     // 生成实现代码
     let expanded = quote! {
+        // Trait 方法实现
         #[async_trait::async_trait]
         impl sqlxplus::Crud for #name {
-            async fn insert<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<sqlxplus::crud::Id>
+            // 泛型版本的 insert（自动类型推断）
+            async fn insert<'e, 'c: 'e, DB, E>(&self, executor: E) -> sqlxplus::Result<sqlxplus::crud::Id>
             where
-                E: sqlxplus::executor::DbExecutor + Send,
+                DB: sqlx::Database + sqlxplus::DatabaseInfo,
+                for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+                E: sqlxplus::DatabaseType<DB = DB>
+                    + sqlx::Executor<'c, Database = DB>
+                    + Send,
+                i64: sqlx::Type<DB> + for<'r> sqlx::Decode<'r, DB>,
+                usize: sqlx::ColumnIndex<DB::Row>,
+                // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+                // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
+                String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i64: for<'b> sqlx::Encode<'b, DB>,
+                i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
             {
                 use sqlxplus::Model;
-                use sqlxplus::utils::escape_identifier;
+                use sqlxplus::DatabaseInfo;
+                use sqlxplus::db_pool::DbDriver;
                 let table = Self::TABLE;
-                let driver = executor.driver();
-                let escaped_table = escape_identifier(driver, table);
+                let escaped_table = DB::escape_identifier(table);
 
-                // 构建列名和占位符：
-                // - 非 Option 字段：始终参与 INSERT
-                // - Option 字段：仅在 Some 时参与 INSERT（None 则跳过，让数据库用默认值）
+                // 构建列名和占位符
                 let mut columns: Vec<&str> = Vec::new();
-                let mut placeholders: Vec<&str> = Vec::new();
+                let mut placeholders: Vec<String> = Vec::new();
+                let mut placeholder_index = 0;
 
                 // 非 Option 字段：始终参与 INSERT
                 #(
                     columns.push(#insert_normal_field_columns);
-                    placeholders.push("?");
+                    placeholders.push(DB::placeholder(placeholder_index));
+                    placeholder_index += 1;
                 )*
 
                 // Option 字段：仅当为 Some 时参与 INSERT
                 #(
                     if self.#insert_option_field_names.is_some() {
                         columns.push(#insert_option_field_columns);
-                        placeholders.push("?");
+                        placeholders.push(DB::placeholder(placeholder_index));
+                        placeholder_index += 1;
                     }
                 )*
 
-                let raw_sql = format!(
-                    "INSERT INTO {} ({}) VALUES ({})",
-                    escaped_table,
-                    columns.join(", "),
-                    placeholders.join(", ")
-                );
-                let sql = executor.convert_sql(&raw_sql);
-
-                match executor.driver() {
-                    sqlxplus::db_pool::DbDriver::MySql => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#insert_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定
-                        #(
-                            if self.#insert_option_field_names.is_some() {
-                                query = query.bind(&self.#insert_option_field_names);
-                            }
-                        )*
-                        if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                            let result = query
-                                .execute(&mut **tx_ref)
-                                .await?;
-                            Ok(result.last_insert_id() as i64)
-                        } else if let Some(pool_ref) = executor.mysql_pool() {
-                            let result = query
-                                .execute(pool_ref)
-                                .await?;
-                            Ok(result.last_insert_id() as i64)
-                        } else {
-                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
-                        }
-                    }
-                    sqlxplus::db_pool::DbDriver::Postgres => {
+                // 根据数据库类型构建 SQL
+                let sql = match DB::get_driver() {
+                    DbDriver::Postgres => {
                         let pk = Self::PK;
-                        let escaped_pk = escape_identifier(sqlxplus::db_pool::DbDriver::Postgres, pk);
-                        // 为 PostgreSQL 添加 RETURNING 子句
-                        let sql_with_returning = format!("{} RETURNING {}", sql, escaped_pk);
-                        let mut query = sqlx::query_scalar::<_, i64>(&sql_with_returning);
+                        let escaped_pk = DB::escape_identifier(pk);
+                        format!(
+                            "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+                            escaped_table,
+                            columns.join(", "),
+                            placeholders.join(", "),
+                            escaped_pk
+                        )
+                    }
+                    _ => {
+                        format!(
+                            "INSERT INTO {} ({}) VALUES ({})",
+                            escaped_table,
+                            columns.join(", "),
+                            placeholders.join(", ")
+                        )
+                    }
+                };
+
+                // 根据数据库类型执行查询
+                match DB::get_driver() {
+                    DbDriver::Postgres => {
+                        let mut query = sqlx::query_scalar::<_, i64>(&sql);
                         // 非 Option 字段：始终绑定
                         #(
                             query = query.bind(&self.#insert_normal_field_names);
                         )*
                         // Option 字段：仅当为 Some 时绑定
                         #(
-                            if self.#insert_option_field_names.is_some() {
-                                query = query.bind(&self.#insert_option_field_names);
+                            if let Some(ref val) = self.#insert_option_field_names {
+                                query = query.bind(val);
                             }
                         )*
-                        if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                            let id: i64 = query
-                                .fetch_one(&mut **tx_ref)
-                                .await?;
-                            Ok(id)
-                        } else if let Some(pool_ref) = executor.pg_pool() {
-                            let id: i64 = query
-                                .fetch_one(pool_ref)
-                                .await?;
-                            Ok(id)
-                        } else {
-                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
-                        }
+                        let id: i64 = query.fetch_one(executor).await?;
+                        Ok(id)
                     }
-                    sqlxplus::db_pool::DbDriver::Sqlite => {
+                    DbDriver::MySql => {
                         let mut query = sqlx::query(&sql);
                         // 非 Option 字段：始终绑定
                         #(
@@ -395,183 +407,209 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         )*
                         // Option 字段：仅当为 Some 时绑定
                         #(
-                            if self.#insert_option_field_names.is_some() {
-                                query = query.bind(&self.#insert_option_field_names);
+                            if let Some(ref val) = self.#insert_option_field_names {
+                                query = query.bind(val);
                             }
                         )*
-                        if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                            let result = query
-                                .execute(&mut **tx_ref)
-                                .await?;
-                            Ok(result.last_insert_rowid() as i64)
-                        } else if let Some(pool_ref) = executor.sqlite_pool() {
-                            let result = query
-                                .execute(pool_ref)
-                                .await?;
-                            Ok(result.last_insert_rowid() as i64)
-                        } else {
-                            Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable)
+                        let result = query.execute(executor).await?;
+                        // 在泛型上下文中，我们需要使用 unsafe 转换来访问数据库特定的方法
+                        // 这是安全的，因为我们已经通过 DB::get_driver() 确认了数据库类型
+                        // 并且我们知道 DB = MySql，所以 result 的类型是 MySqlQueryResult
+                        unsafe {
+                            use sqlx::mysql::MySqlQueryResult;
+                            let ptr: *const DB::QueryResult = &result;
+                            let mysql_ptr = ptr as *const MySqlQueryResult;
+                            Ok((*mysql_ptr).last_insert_id() as i64)
+                        }
+                    }
+                    DbDriver::Sqlite => {
+                        let mut query = sqlx::query(&sql);
+                        // 非 Option 字段：始终绑定
+                        #(
+                            query = query.bind(&self.#insert_normal_field_names);
+                        )*
+                        // Option 字段：仅当为 Some 时绑定
+                        #(
+                            if let Some(ref val) = self.#insert_option_field_names {
+                                query = query.bind(val);
+                            }
+                        )*
+                        let result = query.execute(executor).await?;
+                        // 在泛型上下文中，我们需要使用 unsafe 转换来访问数据库特定的方法
+                        unsafe {
+                            use sqlx::sqlite::SqliteQueryResult;
+                            let ptr: *const DB::QueryResult = &result;
+                            let sqlite_ptr = ptr as *const SqliteQueryResult;
+                            Ok((*sqlite_ptr).last_insert_rowid() as i64)
                         }
                     }
                 }
             }
 
-            async fn update<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<()>
+            // 泛型版本的 update（自动类型推断）
+            async fn update<'e, 'c: 'e, DB, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
-                E: sqlxplus::executor::DbExecutor + Send,
+                DB: sqlx::Database + sqlxplus::DatabaseInfo,
+                for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+                E: sqlxplus::DatabaseType<DB = DB>
+                    + sqlx::Executor<'c, Database = DB>
+                    + Send,
+                // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+                // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
+                String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
             {
                 use sqlxplus::Model;
-                use sqlxplus::utils::escape_identifier;
+                use sqlxplus::DatabaseInfo;
                 let table = Self::TABLE;
                 let pk = Self::PK;
-                let driver = executor.driver();
-                let escaped_table = escape_identifier(driver, table);
-                let escaped_pk = escape_identifier(driver, pk);
+                let escaped_table = DB::escape_identifier(table);
+                let escaped_pk = DB::escape_identifier(pk);
 
-                // 构建 UPDATE SET 子句（Patch 语义）：
-                // - 非 Option 字段：始终参与更新
-                // - Option 字段：仅当为 Some 时参与更新
+                // 构建 UPDATE SET 子句（Patch 语义）
                 let mut set_parts: Vec<String> = Vec::new();
+                let mut placeholder_index = 0;
 
                 // 非 Option 字段
                 #(
-                    set_parts.push(format!("{} = ?", #update_normal_field_columns));
+                    set_parts.push(format!("{} = {}", DB::escape_identifier(#update_normal_field_columns), DB::placeholder(placeholder_index)));
+                    placeholder_index += 1;
                 )*
 
                 // Option 字段
                 #(
                     if self.#update_option_field_names.is_some() {
-                        set_parts.push(format!("{} = ?", #update_option_field_columns));
+                        set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
+                        placeholder_index += 1;
                     }
                 )*
 
-                let raw_sql = if !set_parts.is_empty() {
-                    format!(
-                        "UPDATE {} SET {} WHERE {} = ?",
-                        escaped_table,
-                        set_parts.join(", "),
-                        escaped_pk,
-                    )
-                } else {
-                    // 没有需要更新的字段，直接返回 Ok(())
+                if set_parts.is_empty() {
                     return Ok(());
-                };
-
-                let sql = executor.convert_sql(&raw_sql);
-
-                match executor.driver() {
-                    sqlxplus::db_pool::DbDriver::MySql => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#update_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定
-                        #(
-                            if self.#update_option_field_names.is_some() {
-                                query = query.bind(&self.#update_option_field_names);
-                            }
-                        )*
-                        query = query.bind(&self.#pk_ident);
-                        if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                            query.execute(&mut **tx_ref).await?;
-                        } else if let Some(pool_ref) = executor.mysql_pool() {
-                            query.execute(pool_ref).await?;
-                        } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
-                        }
-                    }
-                    sqlxplus::db_pool::DbDriver::Postgres => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#update_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定
-                        #(
-                            if self.#update_option_field_names.is_some() {
-                                query = query.bind(&self.#update_option_field_names);
-                            }
-                        )*
-                        query = query.bind(&self.#pk_ident);
-                        if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                            query.execute(&mut **tx_ref).await?;
-                        } else if let Some(pool_ref) = executor.pg_pool() {
-                            query.execute(pool_ref).await?;
-                        } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
-                        }
-                    }
-                    sqlxplus::db_pool::DbDriver::Sqlite => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#update_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定
-                        #(
-                            if self.#update_option_field_names.is_some() {
-                                query = query.bind(&self.#update_option_field_names);
-                            }
-                        )*
-                        query = query.bind(&self.#pk_ident);
-                        if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                            query.execute(&mut **tx_ref).await?;
-                        } else if let Some(pool_ref) = executor.sqlite_pool() {
-                            query.execute(pool_ref).await?;
-                        } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
-                        }
-                    }
                 }
+
+                let sql = format!(
+                    "UPDATE {} SET {} WHERE {} = {}",
+                    escaped_table,
+                    set_parts.join(", "),
+                    escaped_pk,
+                    DB::placeholder(placeholder_index)
+                );
+
+                let mut query = sqlx::query(&sql);
+                // 非 Option 字段：始终绑定
+                #(
+                    query = query.bind(&self.#update_normal_field_names);
+                )*
+                // Option 字段：仅当为 Some 时绑定
+                #(
+                    if let Some(ref val) = self.#update_option_field_names {
+                        query = query.bind(val);
+                    }
+                )*
+                query = query.bind(&self.#pk_ident);
+                query.execute(executor).await?;
                 Ok(())
             }
 
-            /// 更新记录（包含 Option 字段为 None 的重置）
-            ///
-            /// - 非 Option 字段：始终参与更新（col = ?）
-            /// - Option 字段：
-            ///   - Some(v)：col = ?
-            ///   - None：col = DEFAULT（由数据库决定置空或使用默认值）
-            async fn update_with_none<E>(&self, executor: &mut E) -> sqlxplus::db_pool::Result<()>
+            // 泛型版本的 update_with_none（自动类型推断）
+            async fn update_with_none<'e, 'c: 'e, DB, E>(&self, executor: E) -> sqlxplus::Result<()>
             where
-                E: sqlxplus::executor::DbExecutor + Send,
+                DB: sqlx::Database + sqlxplus::DatabaseInfo,
+                for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+                E: sqlxplus::DatabaseType<DB = DB>
+                    + sqlx::Executor<'c, Database = DB>
+                    + Send,
+                // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+                // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
+                String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+                Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
             {
                 use sqlxplus::Model;
-                use sqlxplus::utils::escape_identifier;
+                use sqlxplus::DatabaseInfo;
+                use sqlxplus::db_pool::DbDriver;
                 let table = Self::TABLE;
                 let pk = Self::PK;
-                let driver = executor.driver();
-                let escaped_table = escape_identifier(driver, table);
-                let escaped_pk = escape_identifier(driver, pk);
+                let escaped_table = DB::escape_identifier(table);
+                let escaped_pk = DB::escape_identifier(pk);
 
                 // 构建 UPDATE SET 子句（Reset 语义）
                 let mut set_parts: Vec<String> = Vec::new();
+                let mut placeholder_index = 0;
 
                 // 非 Option 字段：始终更新为当前值
                 #(
-                    set_parts.push(format!("{} = ?", #update_normal_field_columns));
+                    set_parts.push(format!("{} = {}", DB::escape_identifier(#update_normal_field_columns), DB::placeholder(placeholder_index)));
+                    placeholder_index += 1;
                 )*
 
-                // Option 字段：Some -> ?，None -> DEFAULT/NULL（根据驱动类型）
-                // SQLite 不支持 DEFAULT，且不可空字段不能设置为 NULL，所以跳过 None 字段的更新
-                match driver {
-                    sqlxplus::db_pool::DbDriver::Sqlite => {
-                        // SQLite: 仅更新 Some 值的字段，跳过 None 字段（因为 SQLite 不支持 DEFAULT）
+                // Option 字段：根据数据库类型处理
+                match DB::get_driver() {
+                    DbDriver::Sqlite => {
+                        // SQLite 不支持 DEFAULT，跳过 None 字段
                         #(
                             if self.#update_option_field_names.is_some() {
-                                set_parts.push(format!("{} = ?", #update_option_field_columns));
+                                set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
+                                placeholder_index += 1;
                             }
-                            // None 字段跳过，不包含在 SET 子句中
                         )*
                     }
                     _ => {
-                        // MySQL/PostgreSQL: None -> DEFAULT
+                        // MySQL 和 PostgreSQL 使用 DEFAULT
                         #(
                             if self.#update_option_field_names.is_some() {
-                                set_parts.push(format!("{} = ?", #update_option_field_columns));
+                                set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
+                                placeholder_index += 1;
                             } else {
-                                set_parts.push(format!("{} = DEFAULT", #update_option_field_columns));
+                                set_parts.push(format!("{} = DEFAULT", DB::escape_identifier(#update_option_field_columns)));
                             }
                         )*
                     }
@@ -581,80 +619,27 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     return Ok(());
                 }
 
-                let raw_sql = format!(
-                    "UPDATE {} SET {} WHERE {} = ?",
+                let sql = format!(
+                    "UPDATE {} SET {} WHERE {} = {}",
                     escaped_table,
                     set_parts.join(", "),
                     escaped_pk,
+                    DB::placeholder(placeholder_index)
                 );
 
-                let sql = executor.convert_sql(&raw_sql);
-
-                match executor.driver() {
-                    sqlxplus::db_pool::DbDriver::MySql => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#update_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT）
-                        #(
-                            if self.#update_option_field_names.is_some() {
-                                query = query.bind(&self.#update_option_field_names);
-                            }
-                        )*
-                        query = query.bind(&self.#pk_ident);
-                        if let Some(tx_ref) = executor.mysql_transaction_ref() {
-                            query.execute(&mut **tx_ref).await?;
-                        } else if let Some(pool_ref) = executor.mysql_pool() {
-                            query.execute(pool_ref).await?;
-                        } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
-                        }
+                let mut query = sqlx::query(&sql);
+                // 非 Option 字段：始终绑定
+                #(
+                    query = query.bind(&self.#update_normal_field_names);
+                )*
+                // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT 或跳过）
+                #(
+                    if let Some(ref val) = self.#update_option_field_names {
+                        query = query.bind(val);
                     }
-                    sqlxplus::db_pool::DbDriver::Postgres => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#update_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定
-                        #(
-                            if self.#update_option_field_names.is_some() {
-                                query = query.bind(&self.#update_option_field_names);
-                            }
-                        )*
-                        query = query.bind(&self.#pk_ident);
-                        if let Some(tx_ref) = executor.postgres_transaction_ref() {
-                            query.execute(&mut **tx_ref).await?;
-                        } else if let Some(pool_ref) = executor.pg_pool() {
-                            query.execute(pool_ref).await?;
-                        } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
-                        }
-                    }
-                    sqlxplus::db_pool::DbDriver::Sqlite => {
-                        let mut query = sqlx::query(&sql);
-                        // 非 Option 字段：始终绑定
-                        #(
-                            query = query.bind(&self.#update_normal_field_names);
-                        )*
-                        // Option 字段：仅当为 Some 时绑定
-                        #(
-                            if self.#update_option_field_names.is_some() {
-                                query = query.bind(&self.#update_option_field_names);
-                            }
-                        )*
-                        query = query.bind(&self.#pk_ident);
-                        if let Some(tx_ref) = executor.sqlite_transaction_ref() {
-                            query.execute(&mut **tx_ref).await?;
-                        } else if let Some(pool_ref) = executor.sqlite_pool() {
-                            query.execute(pool_ref).await?;
-                        } else {
-                            return Err(sqlxplus::db_pool::DbPoolError::NoPoolAvailable);
-                        }
-                    }
-                }
+                )*
+                query = query.bind(&self.#pk_ident);
+                query.execute(executor).await?;
                 Ok(())
             }
         }

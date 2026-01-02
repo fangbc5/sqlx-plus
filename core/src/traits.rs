@@ -1,7 +1,9 @@
-use crate::crud::{Id, Page};
-use crate::db_pool::Result;
-use crate::executor::DbExecutor;
+use crate::crud::Page;
+use crate::error::Result;
 use crate::query_builder::QueryBuilder;
+
+/// 主键 ID 类型
+pub type Id = i64;
 
 /// Model trait 定义了模型的基本元数据
 pub trait Model: Sized {
@@ -17,6 +19,7 @@ pub trait Model: Sized {
 ///
 /// 注意：使用此 trait 时，需要确保启用了相应的数据库特性（mysql、postgres、sqlite）
 #[async_trait::async_trait]
+#[allow(async_fn_in_trait)]
 #[cfg_attr(
     all(feature = "mysql", feature = "postgres", feature = "sqlite"),
     doc = "支持所有数据库驱动"
@@ -30,49 +33,55 @@ pub trait Crud:
     + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
     + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
 {
-    /// 根据 ID 查找记录
-    async fn find_by_id<E>(
-        executor: &mut E,
-        id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-            + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-            + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-            + sqlx::Type<sqlx::MySql>
-            + sqlx::Type<sqlx::Postgres>
-            + sqlx::Type<sqlx::Sqlite>
-            + Send
-            + Sync,
-    ) -> Result<Option<Self>>
-    where
-        E: DbExecutor + Send + Sync,
-    {
-        crate::crud::find_by_id::<Self, E>(executor, id).await
-    }
-
-    /// 根据多个 ID 查找记录
-    async fn find_by_ids<I, E>(executor: &mut E, ids: I) -> Result<Vec<Self>>
-    where
-        I: IntoIterator + Send,
-        I::Item: for<'q> sqlx::Encode<'q, sqlx::MySql>
-            + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-            + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-            + sqlx::Type<sqlx::MySql>
-            + sqlx::Type<sqlx::Postgres>
-            + sqlx::Type<sqlx::Sqlite>
-            + Send
-            + Sync
-            + Clone,
-        E: DbExecutor + Send + Sync,
-    {
-        crate::crud::find_by_ids::<Self, I, E>(executor, ids).await
-    }
-
     /// 插入记录
-    async fn insert<E>(&self, executor: &mut E) -> Result<Id>
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let id = user.insert(pool.mysql_pool()).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let id = user.insert(tx.as_mysql_executor()).await?;
+    /// ```
+    async fn insert<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<Id>
     where
-        E: DbExecutor,
-    {
-        crate::crud::insert::<Self, E>(self, executor).await
-    }
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: crate::database_type::DatabaseType<DB = DB> + sqlx::Executor<'c, Database = DB> + Send,
+        // PostgreSQL 使用 query_scalar 需要这些约束
+        i64: sqlx::Type<DB> + for<'r> sqlx::Decode<'r, DB>,
+        usize: sqlx::ColumnIndex<DB::Row>,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
     /// 更新记录（Patch 语义）
     ///
@@ -81,13 +90,49 @@ pub trait Crud:
     ///   - `Some(v)`：生成 `SET col = ?` 并绑定 `v`；
     ///   - `None`：不生成对应的 `SET` 子句，即**不修改该列**，保留数据库中的原值。
     ///
-    /// 默认实现委托给 `crate::crud::update`，具体 SQL 由 `derive(CRUD)` 宏生成。
-    async fn update<E>(&self, executor: &mut E) -> Result<()>
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// user.update(pool.mysql_pool()).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// user.update(tx.as_mysql_executor()).await?;
+    /// ```
+    async fn update<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<()>
     where
-        E: DbExecutor,
-    {
-        crate::crud::update::<Self, E>(self, executor).await
-    }
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: crate::database_type::DatabaseType<DB = DB> + sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
     /// 更新记录（包含 None 字段的重置，Reset 语义）
     ///
@@ -96,132 +141,478 @@ pub trait Crud:
     ///   - Some(v)：更新为 v
     ///   - None：更新为数据库默认值（等价于 `SET col = DEFAULT`，具体行为由数据库决定）
     ///
-    /// 默认实现委托给 `crate::crud::update_with_none`，实际 SQL 由 `derive(CRUD)` 宏生成。
-    async fn update_with_none<E>(&self, executor: &mut E) -> Result<()>
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// user.update_with_none(pool.mysql_pool()).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// user.update_with_none(tx.as_mysql_executor()).await?;
+    /// ```
+    async fn update_with_none<'e, 'c: 'e, DB, E>(&self, executor: E) -> Result<()>
     where
-        E: DbExecutor,
-    {
-        crate::crud::update_with_none::<Self, E>(self, executor).await
-    }
+        DB: sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+        E: crate::database_type::DatabaseType<DB = DB> + sqlx::Executor<'c, Database = DB> + Send,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<i16>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f64>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<f32>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<bool>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::DateTime<chrono::Utc>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::DateTime<chrono::Utc>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDateTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDateTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveDate: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveDate>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        chrono::NaiveTime: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<chrono::NaiveTime>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<Vec<u8>>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        serde_json::Value: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+        Option<serde_json::Value>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>;
 
-    /// 根据 ID 删除记录
-    /// 如果指定了 SOFT_DELETE_FIELD，则进行逻辑删除；否则进行物理删除
-    async fn delete_by_id<E>(
-        executor: &mut E,
-        id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-            + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-            + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-            + sqlx::Type<sqlx::MySql>
-            + sqlx::Type<sqlx::Postgres>
-            + sqlx::Type<sqlx::Sqlite>
+    /// 根据 ID 查找单条记录
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let user = User::find_by_id(pool.mysql_pool(), 1).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let user = User::find_by_id(tx.as_mysql_executor(), 1).await?;
+    /// ```
+    async fn find_by_id<'e, 'c: 'e, E>(
+        executor: E,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
             + Send
             + Sync,
-    ) -> Result<()>
+    ) -> Result<Option<Self>>
     where
-        E: DbExecutor,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
     {
-        if Self::SOFT_DELETE_FIELD.is_some() {
-            crate::crud::soft_delete_by_id::<Self, E>(executor, id).await
-        } else {
-            crate::crud::hard_delete_by_id::<Self, E>(executor, id).await
-        }
+        crate::crud::find_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 
-    /// 根据 ID 进行逻辑删除（将逻辑删除字段设置为 1）
-    async fn soft_delete_by_id<E>(
-        executor: &mut E,
-        id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-            + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-            + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-            + sqlx::Type<sqlx::MySql>
-            + sqlx::Type<sqlx::Postgres>
-            + sqlx::Type<sqlx::Sqlite>
-            + Send
-            + Sync,
-    ) -> Result<()>
+    /// 根据多个 ID 查找记录
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let users = User::find_by_ids(pool.mysql_pool(), vec![1, 2, 3]).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let users = User::find_by_ids(tx.as_mysql_executor(), vec![1, 2, 3]).await?;
+    /// ```
+    async fn find_by_ids<'e, 'c: 'e, I, E>(executor: E, ids: I) -> Result<Vec<Self>>
     where
-        E: DbExecutor,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
+        I: IntoIterator + Send,
+        I::Item: for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync
+            + Clone,
     {
-        crate::crud::soft_delete_by_id::<Self, E>(executor, id).await
+        crate::crud::find_by_ids::<<E as crate::database_type::DatabaseType>::DB, Self, I, E>(
+            executor, ids,
+        )
+        .await
     }
 
-    /// 根据 ID 进行物理删除（真正删除记录）
-    async fn hard_delete_by_id<E>(
-        executor: &mut E,
-        id: impl for<'q> sqlx::Encode<'q, sqlx::MySql>
-            + for<'q> sqlx::Encode<'q, sqlx::Postgres>
-            + for<'q> sqlx::Encode<'q, sqlx::Sqlite>
-            + sqlx::Type<sqlx::MySql>
-            + sqlx::Type<sqlx::Postgres>
-            + sqlx::Type<sqlx::Sqlite>
-            + Send
-            + Sync,
-    ) -> Result<()>
+    /// 根据查询构建器查找单条记录
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let builder = QueryBuilder::new("SELECT * FROM user").and_eq("id", 1);
+    /// let user = User::find_one(pool.mysql_pool(), builder).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let user = User::find_one(tx.as_mysql_executor(), builder).await?;
+    /// ```
+    async fn find_one<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<Option<Self>>
     where
-        E: DbExecutor,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
+        String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i16: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::hard_delete_by_id::<Self, E>(executor, id).await
+        crate::crud::find_one::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, builder,
+        )
+        .await
+    }
+
+    /// 根据查询构建器查找所有记录
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // 使用 Pool（自动推断为 MySql）- 查询所有记录
+    /// let users = User::find_all(pool.mysql_pool(), None).await?;
+    ///
+    /// // 使用查询构建器
+    /// let builder = QueryBuilder::new("SELECT * FROM user").and_eq("status", 1);
+    /// let users = User::find_all(pool.mysql_pool(), Some(builder)).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let users = User::find_all(tx.as_mysql_executor(), None).await?;
+    /// ```
+    async fn find_all<'e, 'c: 'e, E>(
+        executor: E,
+        builder: Option<QueryBuilder>,
+    ) -> Result<Vec<Self>>
+    where
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // 注意：只包含三种数据库（MySQL、PostgreSQL、SQLite）都支持的类型
+        String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i16: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+    {
+        crate::crud::find_all::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, builder,
+        )
+        .await
+    }
+
+    /// 统计记录数量
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let builder = QueryBuilder::new("SELECT * FROM user");
+    /// let count = User::count(pool.mysql_pool(), builder).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let count = User::count(tx.as_mysql_executor(), builder).await?;
+    /// ```
+    async fn count<'e, 'c: 'e, E>(executor: E, builder: QueryBuilder) -> Result<u64>
+    where
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // i64 还需要实现 Decode<DB>（用于从查询结果中读取）
+        // usize 需要实现 ColumnIndex<DB::Row>（用于通过索引访问列）
+        String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>
+            + for<'r> sqlx::Decode<'r, <E as crate::database_type::DatabaseType>::DB>,
+        i32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i16: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        usize: sqlx::ColumnIndex<
+            <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+        >,
+    {
+        crate::crud::count::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, builder,
+        )
+        .await
     }
 
     /// 分页查询
-    async fn paginate<E>(
-        executor: &mut E,
+    ///
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // 使用 Pool（自动推断为 MySql）
+    /// let builder = QueryBuilder::new("SELECT * FROM user");
+    /// let page = User::paginate(pool.mysql_pool(), builder, 1, 10).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// let page = User::paginate(tx.as_mysql_executor(), builder, 1, 10).await?;
+    /// ```
+    async fn paginate<'e, 'c: 'e, E>(
+        executor: E,
         builder: QueryBuilder,
         page: u64,
         size: u64,
     ) -> Result<Page<Self>>
     where
-        E: DbExecutor + Send + Sync,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Clone,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
+        // 基本类型必须实现 Type<DB> 和 Encode<DB>（用于绑定值）
+        // i64 还需要实现 Decode<DB>（用于从查询结果中读取）
+        // usize 需要实现 ColumnIndex<DB::Row>（用于通过索引访问列）
+        String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>
+            + for<'r> sqlx::Decode<'r, <E as crate::database_type::DatabaseType>::DB>,
+        i32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i16: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        usize: sqlx::ColumnIndex<
+            <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+        >,
     {
-        crate::crud::paginate::<Self, E>(executor, builder, page, size).await
+        crate::crud::paginate::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, builder, page, size,
+        )
+        .await
     }
 
-    /// 安全查询所有记录（限制最多 1000 条）
-    /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
+    /// 根据 ID 物理删除记录
     ///
-    /// # 参数
-    /// * `executor` - 数据库执行器（DbPool 或 Transaction）
-    /// * `builder` - 可选的查询构建器，如果为 None，则查询所有记录
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
-    /// # 返回
-    /// 返回最多 1000 条记录的向量
-    async fn find_all<E>(executor: &mut E, builder: Option<QueryBuilder>) -> Result<Vec<Self>>
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// User::hard_delete_by_id(pool.mysql_pool(), 1).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// User::hard_delete_by_id(tx.as_mysql_executor(), 1).await?;
+    /// ```
+    async fn hard_delete_by_id<'e, 'c: 'e, E>(
+        executor: E,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
+    ) -> Result<()>
     where
-        E: DbExecutor + Send + Sync,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::find_all::<Self, E>(executor, builder).await
+        crate::crud::hard_delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 
-    /// 查询单条记录（使用 QueryBuilder）
-    /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
-    /// 自动添加 LIMIT 1 限制
+    /// 根据 ID 逻辑删除记录
     ///
-    /// # 参数
-    /// * `executor` - 数据库执行器（DbPool 或 Transaction）
-    /// * `builder` - 查询构建器
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
-    /// # 返回
-    /// 返回单条记录，如果未找到则返回 None
-    async fn find_one<E>(executor: &mut E, builder: QueryBuilder) -> Result<Option<Self>>
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// User::soft_delete_by_id(pool.mysql_pool(), 1).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// User::soft_delete_by_id(tx.as_mysql_executor(), 1).await?;
+    /// ```
+    async fn soft_delete_by_id<'e, 'c: 'e, E>(
+        executor: E,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
+    ) -> Result<()>
     where
-        E: DbExecutor + Send + Sync,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::find_one::<Self, E>(executor, builder).await
+        crate::crud::soft_delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 
-    /// 统计记录数量（使用 QueryBuilder）
-    /// 如果指定了 SOFT_DELETE_FIELD，自动过滤已删除的记录
+    /// 根据 ID 删除记录
     ///
-    /// # 参数
-    /// * `executor` - 数据库执行器（DbPool 或 Transaction）
-    /// * `builder` - 查询构建器
+    /// 如果模型定义了 `SOFT_DELETE_FIELD`，则使用逻辑删除；否则使用物理删除。
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
     ///
-    /// # 返回
-    /// 返回符合条件的记录数量
-    async fn count<E>(executor: &mut E, builder: QueryBuilder) -> Result<u64>
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 使用 Pool（自动推断为 MySql）
+    /// User::delete_by_id(pool.mysql_pool(), 1).await?;
+    ///
+    /// // 使用 Transaction（自动推断为 MySql）
+    /// User::delete_by_id(tx.as_mysql_executor(), 1).await?;
+    /// ```
+    async fn delete_by_id<'e, 'c: 'e, E>(
+        executor: E,
+        id: impl for<'q> sqlx::Encode<'q, <E as crate::database_type::DatabaseType>::DB>
+            + sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + Send
+            + Sync,
+    ) -> Result<()>
     where
-        E: DbExecutor + Send + Sync,
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
     {
-        crate::crud::count::<Self, E>(executor, builder).await
+        crate::crud::delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, id,
+        )
+        .await
     }
 }

@@ -1,8 +1,8 @@
 #[cfg(any(feature = "mysql", feature = "postgres", feature = "sqlite"))]
 use sqlx::Pool;
 use std::sync::Arc;
-use thiserror::Error;
 
+use crate::error::{Result, SqlxPlusError};
 use crate::executor::DbExecutor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +21,7 @@ impl DbDriver {
         } else if url.starts_with("sqlite://") || url.starts_with("sqlite:") {
             Ok(DbDriver::Sqlite)
         } else {
-            Err(DbPoolError::UnsupportedDatabase(url.to_string()))
+            Err(SqlxPlusError::UnsupportedDatabase(url.to_string()))
         }
     }
 
@@ -63,18 +63,6 @@ pub struct DbPool {
     sqlite: Option<Arc<Pool<sqlx::Sqlite>>>,
 }
 
-#[derive(Debug, Error)]
-pub enum DbPoolError {
-    #[error("Unsupported database URL: {0}")]
-    UnsupportedDatabase(String),
-    #[error("Database connection error: {0}")]
-    ConnectionError(#[from] sqlx::Error),
-    #[error("No connection pool available for driver")]
-    NoPoolAvailable,
-}
-
-pub type Result<T> = std::result::Result<T, DbPoolError>;
-
 impl DbPool {
     /// 从数据库 URL 连接并创建 DbPool
     pub async fn connect(url: &str) -> Result<Self> {
@@ -97,7 +85,7 @@ impl DbPool {
                 Self::from_sqlite_pool(Arc::new(pool))
             }
             #[allow(unreachable_patterns)]
-            _ => Err(DbPoolError::UnsupportedDatabase(format!(
+            _ => Err(SqlxPlusError::UnsupportedDatabase(format!(
                 "Unsupported database driver, only mysql, postgres, sqlite is supported, got: {:?}",
                 driver
             ))),
@@ -148,18 +136,24 @@ impl DbPool {
     }
 
     #[cfg(feature = "mysql")]
-    pub fn mysql_pool(&self) -> Option<&Pool<sqlx::MySql>> {
-        self.mysql.as_deref()
+    pub fn mysql_pool(&self) -> &Pool<sqlx::MySql> {
+        self.mysql
+            .as_deref()
+            .expect("MySQL pool is not initialized")
     }
 
     #[cfg(feature = "postgres")]
-    pub fn pg_pool(&self) -> Option<&Pool<sqlx::Postgres>> {
-        self.pg.as_deref()
+    pub fn pg_pool(&self) -> &Pool<sqlx::Postgres> {
+        self.pg
+            .as_deref()
+            .expect("PostgreSQL pool is not initialized")
     }
 
     #[cfg(feature = "sqlite")]
-    pub fn sqlite_pool(&self) -> Option<&Pool<sqlx::Sqlite>> {
-        self.sqlite.as_deref()
+    pub fn sqlite_pool(&self) -> &Pool<sqlx::Sqlite> {
+        self.sqlite
+            .as_deref()
+            .expect("SQLite pool is not initialized")
     }
 
     pub fn convert_sql(&self, sql: &str) -> String {
@@ -171,24 +165,30 @@ impl DbPool {
         match self.driver {
             #[cfg(feature = "mysql")]
             DbDriver::MySql => {
-                let pool = self.mysql.as_deref().ok_or(DbPoolError::NoPoolAvailable)?;
+                let pool = self
+                    .mysql
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let result = sqlx::query(&sql).execute(pool).await?;
                 Ok(result.rows_affected())
             }
             #[cfg(feature = "postgres")]
             DbDriver::Postgres => {
-                let pool = self.pg.as_deref().ok_or(DbPoolError::NoPoolAvailable)?;
+                let pool = self.pg.as_deref().ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let result = sqlx::query(&sql).execute(pool).await?;
                 Ok(result.rows_affected())
             }
             #[cfg(feature = "sqlite")]
             DbDriver::Sqlite => {
-                let pool = self.sqlite.as_deref().ok_or(DbPoolError::NoPoolAvailable)?;
+                let pool = self
+                    .sqlite
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let result = sqlx::query(&sql).execute(pool).await?;
                 Ok(result.rows_affected())
             }
             #[allow(unreachable_patterns)]
-            _ => Err(DbPoolError::NoPoolAvailable),
+            _ => Err(SqlxPlusError::NoPoolAvailable),
         }
     }
 
@@ -204,24 +204,30 @@ impl DbPool {
         match self.driver {
             #[cfg(feature = "mysql")]
             DbDriver::MySql => {
-                let pool = self.mysql.as_deref().ok_or(DbPoolError::NoPoolAvailable)?;
+                let pool = self
+                    .mysql
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let rows: Vec<T> = sqlx::query_as(&sql).fetch_all(pool).await?;
                 Ok(rows)
             }
             #[cfg(feature = "postgres")]
             DbDriver::Postgres => {
-                let pool = self.pg.as_deref().ok_or(DbPoolError::NoPoolAvailable)?;
+                let pool = self.pg.as_deref().ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let rows: Vec<T> = sqlx::query_as(&sql).fetch_all(pool).await?;
                 Ok(rows)
             }
             #[cfg(feature = "sqlite")]
             DbDriver::Sqlite => {
-                let pool = self.sqlite.as_deref().ok_or(DbPoolError::NoPoolAvailable)?;
+                let pool = self
+                    .sqlite
+                    .as_deref()
+                    .ok_or(SqlxPlusError::NoPoolAvailable)?;
                 let rows: Vec<T> = sqlx::query_as(&sql).fetch_all(pool).await?;
                 Ok(rows)
             }
             #[allow(unreachable_patterns)]
-            _ => Err(DbPoolError::NoPoolAvailable),
+            _ => Err(SqlxPlusError::NoPoolAvailable),
         }
     }
 }

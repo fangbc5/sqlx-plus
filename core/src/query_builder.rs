@@ -9,9 +9,15 @@ pub enum BindValue {
     Int64(i64),
     Int32(i32),
     Int16(i16),
+    Int8(i8),
+    UInt64(u64),
+    UInt32(u32),
+    UInt16(u16),
+    UInt8(u8),
     Float64(f64),
     Float32(f32),
     Bool(bool),
+    Bytes(Vec<u8>),
     Null,
 }
 
@@ -22,9 +28,15 @@ impl BindValue {
             BindValue::Int64(i) => i.to_string(),
             BindValue::Int32(i) => i.to_string(),
             BindValue::Int16(i) => i.to_string(),
+            BindValue::Int8(i) => i.to_string(),
+            BindValue::UInt64(i) => i.to_string(),
+            BindValue::UInt32(i) => i.to_string(),
+            BindValue::UInt16(i) => i.to_string(),
+            BindValue::UInt8(i) => i.to_string(),
             BindValue::Float64(f) => f.to_string(),
             BindValue::Float32(f) => f.to_string(),
             BindValue::Bool(b) => b.to_string(),
+            BindValue::Bytes(_) => "BLOB".to_string(), // 二进制数据不能直接转换为 SQL 字符串
             BindValue::Null => "NULL".to_string(),
         }
     }
@@ -929,6 +941,36 @@ impl From<i16> for BindValue {
     }
 }
 
+impl From<i8> for BindValue {
+    fn from(i: i8) -> Self {
+        BindValue::Int8(i)
+    }
+}
+
+impl From<u64> for BindValue {
+    fn from(i: u64) -> Self {
+        BindValue::UInt64(i)
+    }
+}
+
+impl From<u32> for BindValue {
+    fn from(i: u32) -> Self {
+        BindValue::UInt32(i)
+    }
+}
+
+impl From<u16> for BindValue {
+    fn from(i: u16) -> Self {
+        BindValue::UInt16(i)
+    }
+}
+
+impl From<u8> for BindValue {
+    fn from(i: u8) -> Self {
+        BindValue::UInt8(i)
+    }
+}
+
 impl From<f64> for BindValue {
     fn from(f: f64) -> Self {
         BindValue::Float64(f)
@@ -944,6 +986,18 @@ impl From<f32> for BindValue {
 impl From<bool> for BindValue {
     fn from(b: bool) -> Self {
         BindValue::Bool(b)
+    }
+}
+
+impl From<Vec<u8>> for BindValue {
+    fn from(b: Vec<u8>) -> Self {
+        BindValue::Bytes(b)
+    }
+}
+
+impl From<&[u8]> for BindValue {
+    fn from(b: &[u8]) -> Self {
+        BindValue::Bytes(b.to_vec())
     }
 }
 
