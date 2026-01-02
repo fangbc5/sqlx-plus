@@ -316,9 +316,9 @@ COMMENT ON TABLE "user" IS '用户表';
 
 ### 类型选择规则
 
-- 如果字段为 `NULLable` 或有默认值，生成 `Option<T>`
+- 如果字段为 `NULLable`，生成 `Option<T>`
+- 如果字段有默认值，生成 `Option<T>`（因为插入时可以不手动赋值）
 - 如果字段为 `NOT NULL` 且无默认值，生成 `T`
-- `String` 类型统一使用 `Option<String>` 以保持一致性
 
 ## 使用场景
 

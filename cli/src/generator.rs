@@ -387,9 +387,12 @@ fn sql_type_to_rust(col: &ColumnInfo) -> String {
         _ => "String",
     };
 
-    // 有默认值 或 可空 字段，统一生成为 Option<T>
-    // 对于 String 类型，统一使用 Option<String> 以保持一致性（避免空值问题）
-    let needs_option = col.nullable || col.default.is_some() || base_type == "String";
+    // 类型选择规则：
+    // - 如果字段为 NULLable，生成 `Option<T>`
+    // - 如果字段有默认值，生成 `Option<T>`（因为插入时可以不手动赋值）
+    // - 如果字段为 NOT NULL 且无默认值，生成 `T`
+    // 注意：String 类型也遵循此规则，不再强制使用 Option
+    let needs_option = col.nullable || col.default.is_some();
 
     if needs_option {
         format!("Option<{}>", base_type)
