@@ -3,6 +3,55 @@ use proc_macro2;
 use quote::quote;
 use syn::{parse::Parser, parse_macro_input, Data, DataStruct, DeriveInput, Fields, Meta};
 
+/// 去除原始标识符的 r# 前缀
+/// 例如：r#type -> type
+fn strip_raw_identifier_prefix(ident: &str) -> String {
+    if ident.starts_with("r#") {
+        ident[2..].to_string()
+    } else {
+        ident.to_string()
+    }
+}
+
+/// 解析字段的 column 属性，获取列名
+/// 如果指定了 name，使用指定的列名；否则使用去除 r# 前缀后的字段名
+fn parse_column_name(attrs: &[syn::Attribute], field_name: &str) -> String {
+    for attr in attrs {
+        if attr.path().is_ident("column") {
+            if let syn::Meta::List(list) = &attr.meta {
+                let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
+                if let Ok(metas) = parser.parse2(list.tokens.clone()) {
+                    for meta in metas {
+                        if let Meta::NameValue(nv) = meta {
+                            if nv.path.is_ident("name") {
+                                if let syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Str(s),
+                                    ..
+                                }) = nv.value
+                                {
+                                    return s.value();
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if let syn::Meta::NameValue(nv) = &attr.meta {
+                if nv.path.is_ident("name") {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) = &nv.value
+                    {
+                        return s.value();
+                    }
+                }
+            }
+        }
+    }
+    // 如果没有指定 name，使用去除 r# 前缀后的字段名
+    strip_raw_identifier_prefix(field_name)
+}
+
 /// 生成 Model trait 的实现
 ///
 /// 自动生成 `TABLE`、`PK` 和可选的 `SOFT_DELETE_FIELD` 常量
@@ -251,10 +300,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     let mut update_fields_normal_field_columns: Vec<syn::LitStr> = Vec::new();
     let mut update_fields_option_field_names: Vec<&syn::Ident> = Vec::new();
     let mut update_fields_option_field_columns: Vec<syn::LitStr> = Vec::new();
+    // 字段名（用于支持 r#type 这样的原始标识符，在 match 中同时匹配字段名和列名）
+    let mut update_fields_normal_field_name_strs: Vec<syn::LitStr> = Vec::new();
+    let mut update_fields_option_field_name_strs: Vec<syn::LitStr> = Vec::new();
 
     for field in fields {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
+        // 获取数据库列名（处理 r#type 这样的原始标识符和 #[column(name = "...")] 属性）
+        let column_name = parse_column_name(&field.attrs, &field_name_str);
 
         // 检查属性：skip / model
         let mut skip = false;
@@ -271,7 +325,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 pk_ident_opt = Some(field_name);
                 // 主键字段也需要添加到 UpdateFields，因为 UpdateBuilder 需要获取主键值
                 let is_opt = is_option_type(&field.ty);
-                let col_lit = syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
+                let col_lit = syn::LitStr::new(&column_name, proc_macro2::Span::call_site());
                 let is_supported = if is_opt {
                     if let Some(inner_ty) = get_option_inner_type(&field.ty) {
                         is_bind_value_supported_type(inner_ty)
@@ -283,18 +337,22 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 };
                 // 如果主键类型是支持的类型，添加到 UpdateFields
                 if is_supported {
+                    let field_name_lit =
+                        syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
                     if is_opt {
                         update_fields_option_field_names.push(field_name);
                         update_fields_option_field_columns.push(col_lit);
+                        update_fields_option_field_name_strs.push(field_name_lit);
                     } else {
                         update_fields_normal_field_names.push(field_name);
                         update_fields_normal_field_columns.push(col_lit);
+                        update_fields_normal_field_name_strs.push(field_name_lit);
                     }
                 }
             } else {
                 // 非主键字段用于 INSERT / UPDATE
                 let is_opt = is_option_type(&field.ty);
-                let col_lit = syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
+                let col_lit = syn::LitStr::new(&column_name, proc_macro2::Span::call_site());
 
                 // 检查是否是 BindValue 支持的类型
                 let is_supported = if is_opt {
@@ -316,8 +374,11 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                     // 只为支持的类型添加到 UpdateFields
                     if is_supported {
+                        let field_name_lit =
+                            syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
                         update_fields_option_field_names.push(field_name);
                         update_fields_option_field_columns.push(col_lit);
+                        update_fields_option_field_name_strs.push(field_name_lit);
                     }
                 } else {
                     insert_normal_field_names.push(field_name);
@@ -328,8 +389,11 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                     // 只为支持的类型添加到 UpdateFields
                     if is_supported {
+                        let field_name_lit =
+                            syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
                         update_fields_normal_field_names.push(field_name);
                         update_fields_normal_field_columns.push(col_lit);
+                        update_fields_normal_field_name_strs.push(field_name_lit);
                     }
                 }
             }
@@ -704,14 +768,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
         impl sqlxplus::builder::update_builder::UpdateFields for #name {
             fn get_field_value(&self, field_name: &str) -> Option<sqlxplus::builder::query_builder::BindValue> {
                 match field_name {
+                    // 支持字段名和列名两种匹配方式（处理 r#type 这样的原始标识符）
                     #(
-                        #update_fields_normal_field_columns => {
+                        #update_fields_normal_field_columns | #update_fields_normal_field_name_strs => {
                             // 对于非 Option 类型，转换为 BindValue（只包含支持的类型）
                             Some(sqlxplus::builder::query_builder::BindValue::from(self.#update_fields_normal_field_names.clone()))
                         }
                     )*
                     #(
-                        #update_fields_option_field_columns => {
+                        #update_fields_option_field_columns | #update_fields_option_field_name_strs => {
                             // 对于 Option 类型，如果是 Some 则转换，None 则返回 None（只包含支持的类型）
                             self.#update_fields_option_field_names.as_ref().map(|v| {
                                 sqlxplus::builder::query_builder::BindValue::from(v.clone())
@@ -730,7 +795,18 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             }
 
             fn has_field(field_name: &str) -> bool {
-                matches!(field_name, #(#update_normal_field_columns)|* | #(#update_option_field_columns)|*)
+                // 支持字段名和列名两种匹配方式（处理 r#type 这样的原始标识符）
+                #(
+                    if field_name == #update_normal_field_columns || field_name == #update_fields_normal_field_name_strs {
+                        return true;
+                    }
+                )*
+                #(
+                    if field_name == #update_option_field_columns || field_name == #update_fields_option_field_name_strs {
+                        return true;
+                    }
+                )*
+                false
             }
         }
     };
