@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sqlxplus::{Crud, DbPool, QueryBuilder};
+use sqlxplus::{Crud, DbPool, DeleteBuilder, InsertBuilder, QueryBuilder, UpdateBuilder};
 use test_models::User;
 
 #[tokio::main]
@@ -555,6 +555,138 @@ async fn main() -> anyhow::Result<()> {
     } else {
         println!("警告：子事务回滚后，子事务中的记录仍然存在！\n");
     }
+
+    // ========== 20. UPDATE BUILDER - 部分字段更新 ==========
+    println!("=== 20. UPDATE BUILDER - 部分字段更新 ===");
+    let builder_user = User {
+        id: None,
+        username: Some(format!("builder_user_{}", timestamp)),
+        email: Some(format!("builder_user_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let builder_id = builder_user.insert(pool.pg_pool()).await?;
+    println!("插入测试用户，ID: {}", builder_id);
+
+    // 只更新 username 字段
+    let update_user = User {
+        id: Some(builder_id),
+        username: Some(format!("updated_username_{}", timestamp)),
+        email: Some(format!("old_email_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let affected = UpdateBuilder::new(update_user)
+        .field("username")
+        .execute(pool.pg_pool())
+        .await?;
+    println!("更新 username 字段，受影响行数: {}", affected);
+
+    // 验证更新结果
+    let updated_user = User::find_by_id(pool.pg_pool(), builder_id).await?;
+    if let Some(u) = updated_user {
+        println!("更新后 username: {:?}", u.username);
+        println!("更新后 email: {:?} (应该保持原值)", u.email);
+    }
+
+    // 使用 WHERE 条件更新多个字段
+    let update_user2 = User {
+        id: Some(builder_id),
+        username: Some(format!("updated_username2_{}", timestamp)),
+        email: Some(format!("updated_email2_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let affected = UpdateBuilder::new(update_user2)
+        .fields(&["username", "email"])
+        .condition(|b| b.and_eq("id", builder_id))
+        .execute(pool.pg_pool())
+        .await?;
+    println!("使用 WHERE 条件更新多个字段，受影响行数: {}\n", affected);
+
+    // ========== 21. INSERT BUILDER - 指定字段插入 ==========
+    println!("=== 21. INSERT BUILDER - 指定字段插入 ===");
+    let insert_user = User {
+        id: None,
+        username: Some(format!("insert_user_{}", timestamp)),
+        email: Some(format!("insert_user_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let insert_id = InsertBuilder::new(insert_user)
+        .field("username")
+        .field("email")
+        .field("is_del")
+        .execute(pool.pg_pool())
+        .await?;
+    println!("使用 InsertBuilder 插入指定字段，ID: {}", insert_id);
+
+    // 验证插入结果
+    let inserted_user = User::find_by_id(pool.pg_pool(), insert_id).await?;
+    if let Some(u) = inserted_user {
+        println!("插入后 username: {:?}", u.username);
+        println!("插入后 email: {:?}", u.email);
+    }
+
+    // 插入所有字段（除了主键）
+    let insert_user2 = User {
+        id: None,
+        username: Some(format!("insert_user2_{}", timestamp)),
+        email: Some(format!("insert_user2_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let insert_id2 = InsertBuilder::new(insert_user2)
+        .execute(pool.pg_pool())
+        .await?;
+    println!("使用 InsertBuilder 插入所有字段，ID: {}\n", insert_id2);
+
+    // ========== 22. DELETE BUILDER - 条件删除 ==========
+    println!("=== 22. DELETE BUILDER - 条件删除 ===");
+    // 先插入一些测试数据
+    let delete_user1 = User {
+        id: None,
+        username: Some(format!("delete_user1_{}", timestamp)),
+        email: Some(format!("delete_user1_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let delete_id1 = delete_user1.insert(pool.pg_pool()).await?;
+
+    let delete_user2 = User {
+        id: None,
+        username: Some(format!("delete_user2_{}", timestamp)),
+        email: Some(format!("delete_user2_{}@example.com", timestamp)),
+        is_del: Some(0i16),
+        ..Default::default()
+    };
+    let delete_id2 = delete_user2.insert(pool.pg_pool()).await?;
+    println!("插入两条测试数据，ID1: {}, ID2: {}", delete_id1, delete_id2);
+
+    // 使用 WHERE 条件删除一条记录
+    let affected = DeleteBuilder::<User>::new()
+        .condition(|b| b.and_eq("id", delete_id1))
+        .execute(pool.pg_pool())
+        .await?;
+    println!("删除 ID={} 的记录，受影响行数: {}", delete_id1, affected);
+
+    // 验证删除结果
+    let deleted_user = User::find_by_id(pool.pg_pool(), delete_id1).await?;
+    if deleted_user.is_none() {
+        println!("验证成功：记录已被删除");
+    } else {
+        println!("警告：记录仍然存在！");
+    }
+
+    // 使用复杂 WHERE 条件删除
+    let affected = DeleteBuilder::<User>::new()
+        .condition(|b| {
+            b.and_like("username", &format!("delete_user%_{}", timestamp))
+                .and_eq("is_del", 0i16)
+        })
+        .execute(pool.pg_pool())
+        .await?;
+    println!("使用复杂条件删除，受影响行数: {}\n", affected);
 
     println!("所有 CRUD 方法测试完成！");
     Ok(())

@@ -1,6 +1,6 @@
+use crate::builder::query_builder::QueryBuilder;
 use crate::crud::Page;
 use crate::error::Result;
-use crate::query_builder::QueryBuilder;
 
 /// 主键 ID 类型
 pub type Id = i64;

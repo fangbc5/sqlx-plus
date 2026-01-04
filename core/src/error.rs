@@ -14,6 +14,12 @@ pub enum SqlxPlusError {
     /// Generic error message for compatibility
     #[error("{0}")]
     Other(String),
+    /// Invalid field error
+    #[error("Invalid field: {0}")]
+    InvalidField(String),
+    /// Not implemented error
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 }
 
 pub type Result<T> = std::result::Result<T, SqlxPlusError>;

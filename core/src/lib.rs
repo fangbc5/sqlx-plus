@@ -5,16 +5,23 @@ pub mod db_pool;
 pub mod error;
 pub mod executor;
 pub mod macros_api;
-pub mod query_builder;
 pub mod traits;
 pub mod transaction;
 pub mod utils;
 
+// CRUD Builder 模块
+pub mod builder;
+
 pub use database_info::DatabaseInfo;
 pub use database_type::DatabaseType;
 pub use db_pool::{DbDriver, DbPool};
-pub use query_builder::QueryBuilder;
 pub use traits::{Crud, Model};
+
+// CRUD Builder 导出
+pub use builder::{
+    BindValue, DeleteBuilder, InsertBuilder, QueryBuilder, UpdateBuilder, UpdateFields,
+};
+
 #[cfg(feature = "mysql")]
 pub use transaction::with_mysql_nested_transaction;
 #[cfg(feature = "postgres")]

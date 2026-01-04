@@ -1,6 +1,6 @@
+use crate::builder::query_builder::{BindValue, QueryBuilder};
 use crate::database_info::DatabaseInfo;
 use crate::error::{Result, SqlxPlusError};
-use crate::query_builder::{BindValue, QueryBuilder};
 use crate::traits::Model;
 use sqlx::{Database, Row};
 
@@ -9,56 +9,58 @@ pub type Id = i64;
 
 /// 辅助函数：将单个绑定值应用到查询中
 /// 这是一个通用的绑定逻辑，通过宏来应用到不同的查询类型
+#[macro_export]
 macro_rules! apply_bind_value {
     ($query:expr, $bind:expr) => {
         match $bind {
-            BindValue::String(s) => {
+            $crate::builder::query_builder::BindValue::String(s) => {
                 $query = $query.bind(s);
             }
-            BindValue::Int64(i) => {
+            $crate::builder::query_builder::BindValue::Int64(i) => {
                 $query = $query.bind(i);
             }
-            BindValue::Int32(i) => {
-                $query = $query.bind(*i);
+            $crate::builder::query_builder::BindValue::Int32(i) => {
+                $query = $query.bind(i);
             }
-            BindValue::Int16(i) => {
-                $query = $query.bind(*i);
+            $crate::builder::query_builder::BindValue::Int16(i) => {
+                $query = $query.bind(i);
             }
             // i8, u64, u32, u16, u8 在 PostgreSQL 中不支持，但保留在 BindValue 中用于 QueryBuilder
             // 这些类型在 CRUD 操作中会通过类型转换处理
-            BindValue::Int8(i) => {
+            // 注意：当 $bind 是引用时，需要使用 ref 模式或解引用
+            $crate::builder::query_builder::BindValue::Int8(ref i) => {
                 // 转换为 i16（三种数据库都支持的最小整数类型）
                 $query = $query.bind(*i as i16);
             }
-            BindValue::UInt64(i) => {
+            $crate::builder::query_builder::BindValue::UInt64(ref i) => {
                 // 转换为 i64（注意：可能溢出，但这是跨数据库兼容的折中方案）
                 $query = $query.bind(*i as i64);
             }
-            BindValue::UInt32(i) => {
+            $crate::builder::query_builder::BindValue::UInt32(ref i) => {
                 // 转换为 i64
                 $query = $query.bind(*i as i64);
             }
-            BindValue::UInt16(i) => {
+            $crate::builder::query_builder::BindValue::UInt16(ref i) => {
                 // 转换为 i32
                 $query = $query.bind(*i as i32);
             }
-            BindValue::UInt8(i) => {
+            $crate::builder::query_builder::BindValue::UInt8(ref i) => {
                 // 转换为 i16
                 $query = $query.bind(*i as i16);
             }
-            BindValue::Float64(f) => {
+            $crate::builder::query_builder::BindValue::Float64(f) => {
                 $query = $query.bind(f);
             }
-            BindValue::Float32(f) => {
-                $query = $query.bind(*f);
+            $crate::builder::query_builder::BindValue::Float32(f) => {
+                $query = $query.bind(f);
             }
-            BindValue::Bool(b) => {
+            $crate::builder::query_builder::BindValue::Bool(b) => {
                 $query = $query.bind(b);
             }
-            BindValue::Bytes(b) => {
+            $crate::builder::query_builder::BindValue::Bytes(b) => {
                 $query = $query.bind(b);
             }
-            BindValue::Null => {
+            $crate::builder::query_builder::BindValue::Null => {
                 $query = $query.bind(Option::<String>::None);
             }
         }
@@ -102,7 +104,7 @@ where
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     for bind in binds {
-        apply_bind_value!(query, bind);
+        crate::apply_bind_value!(query, bind);
     }
     query
 }
@@ -146,7 +148,7 @@ where
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     for bind in binds {
-        apply_bind_value!(query, bind);
+        crate::apply_bind_value!(query, bind);
     }
     query
 }

@@ -904,10 +904,27 @@ impl QueryBuilder {
     }
 
     /// 返回所有绑定值（WHERE 条件 + HAVING 条件）
+    /// 获取绑定值列表
     pub fn binds(&self) -> Vec<BindValue> {
         let mut all_binds = self.binds.clone();
         all_binds.extend_from_slice(&self.having_binds);
         all_binds
+    }
+
+    /// 构建 WHERE 条件 SQL（公开方法，供 Builder 使用）
+    /// 返回 (sql, bind_count)
+    pub fn build_where_sql(&self, driver: DbDriver, start_bind_index: usize) -> (String, usize) {
+        self.build_conditions_sql(driver, start_bind_index)
+    }
+
+    /// 获取 WHERE 条件的绑定值（不包括 HAVING）
+    pub fn where_binds(&self) -> &[BindValue] {
+        &self.binds
+    }
+
+    /// 检查是否有 WHERE 条件
+    pub fn has_conditions(&self) -> bool {
+        !self.conditions.is_empty()
     }
 }
 

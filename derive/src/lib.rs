@@ -246,6 +246,12 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
     let mut update_option_field_names: Vec<&syn::Ident> = Vec::new();
     let mut update_option_field_columns: Vec<syn::LitStr> = Vec::new();
 
+    // 用于 UpdateFields trait：只包含 BindValue 支持的类型
+    let mut update_fields_normal_field_names: Vec<&syn::Ident> = Vec::new();
+    let mut update_fields_normal_field_columns: Vec<syn::LitStr> = Vec::new();
+    let mut update_fields_option_field_names: Vec<&syn::Ident> = Vec::new();
+    let mut update_fields_option_field_columns: Vec<syn::LitStr> = Vec::new();
+
     for field in fields {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
@@ -263,23 +269,68 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
             if field_name_str == pk {
                 // 记录主键字段
                 pk_ident_opt = Some(field_name);
+                // 主键字段也需要添加到 UpdateFields，因为 UpdateBuilder 需要获取主键值
+                let is_opt = is_option_type(&field.ty);
+                let col_lit = syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
+                let is_supported = if is_opt {
+                    if let Some(inner_ty) = get_option_inner_type(&field.ty) {
+                        is_bind_value_supported_type(inner_ty)
+                    } else {
+                        false
+                    }
+                } else {
+                    is_bind_value_supported_type(&field.ty)
+                };
+                // 如果主键类型是支持的类型，添加到 UpdateFields
+                if is_supported {
+                    if is_opt {
+                        update_fields_option_field_names.push(field_name);
+                        update_fields_option_field_columns.push(col_lit);
+                    } else {
+                        update_fields_normal_field_names.push(field_name);
+                        update_fields_normal_field_columns.push(col_lit);
+                    }
+                }
             } else {
                 // 非主键字段用于 INSERT / UPDATE
                 let is_opt = is_option_type(&field.ty);
                 let col_lit = syn::LitStr::new(&field_name_str, proc_macro2::Span::call_site());
+
+                // 检查是否是 BindValue 支持的类型
+                let is_supported = if is_opt {
+                    if let Some(inner_ty) = get_option_inner_type(&field.ty) {
+                        is_bind_value_supported_type(inner_ty)
+                    } else {
+                        false
+                    }
+                } else {
+                    is_bind_value_supported_type(&field.ty)
+                };
 
                 if is_opt {
                     insert_option_field_names.push(field_name);
                     insert_option_field_columns.push(col_lit.clone());
 
                     update_option_field_names.push(field_name);
-                    update_option_field_columns.push(col_lit);
+                    update_option_field_columns.push(col_lit.clone());
+
+                    // 只为支持的类型添加到 UpdateFields
+                    if is_supported {
+                        update_fields_option_field_names.push(field_name);
+                        update_fields_option_field_columns.push(col_lit);
+                    }
                 } else {
                     insert_normal_field_names.push(field_name);
                     insert_normal_field_columns.push(col_lit.clone());
 
                     update_normal_field_names.push(field_name);
-                    update_normal_field_columns.push(col_lit);
+                    update_normal_field_columns.push(col_lit.clone());
+
+                    // 只为支持的类型添加到 UpdateFields
+                    if is_supported {
+                        update_fields_normal_field_names.push(field_name);
+                        update_fields_normal_field_columns.push(col_lit);
+                    }
                 }
             }
         }
@@ -645,6 +696,50 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
         }
     };
 
+    // 生成 UpdateFields trait 实现（用于 UpdateBuilder 和 InsertBuilder）
+    // 注意：只对 BindValue 支持的基本类型生成转换代码
+    // 对于复杂类型（如 DateTime、JsonValue 等），get_field_value 返回 None
+    // InsertBuilder 和 UpdateBuilder 需要直接使用 sqlx::bind 来处理这些类型
+    let update_fields_impl = quote! {
+        impl sqlxplus::builder::update_builder::UpdateFields for #name {
+            fn get_field_value(&self, field_name: &str) -> Option<sqlxplus::builder::query_builder::BindValue> {
+                match field_name {
+                    #(
+                        #update_fields_normal_field_columns => {
+                            // 对于非 Option 类型，转换为 BindValue（只包含支持的类型）
+                            Some(sqlxplus::builder::query_builder::BindValue::from(self.#update_fields_normal_field_names.clone()))
+                        }
+                    )*
+                    #(
+                        #update_fields_option_field_columns => {
+                            // 对于 Option 类型，如果是 Some 则转换，None 则返回 None（只包含支持的类型）
+                            self.#update_fields_option_field_names.as_ref().map(|v| {
+                                sqlxplus::builder::query_builder::BindValue::from(v.clone())
+                            })
+                        }
+                    )*
+                    _ => None, // 不支持的类型或未包含的字段返回 None
+                }
+            }
+
+            fn get_all_field_names() -> &'static [&'static str] {
+                &[
+                    #(#update_normal_field_columns,)*
+                    #(#update_option_field_columns,)*
+                ]
+            }
+
+            fn has_field(field_name: &str) -> bool {
+                matches!(field_name, #(#update_normal_field_columns)|* | #(#update_option_field_columns)|*)
+            }
+        }
+    };
+
+    let expanded = quote! {
+        #expanded
+        #update_fields_impl
+    };
+
     TokenStream::from(expanded)
 }
 
@@ -660,4 +755,52 @@ fn is_option_type(ty: &syn::Type) -> bool {
         }
     }
     false
+}
+
+/// 检查类型是否是 BindValue 支持的基本类型
+/// 支持的类型：String, i64, i32, i16, f64, f32, bool, Vec<u8>
+fn is_bind_value_supported_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            let type_name = seg.ident.to_string();
+            // 检查是否是支持的基本类型
+            match type_name.as_str() {
+                "String" | "i64" | "i32" | "i16" | "f64" | "f32" | "bool" => true,
+                "Vec" => {
+                    // 对于 Vec，检查是否是 Vec<u8>
+                    if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            if let syn::Type::Path(inner_path) = inner_ty {
+                                if let Some(inner_seg) = inner_path.path.segments.last() {
+                                    return inner_seg.ident == "u8";
+                                }
+                            }
+                        }
+                    }
+                    false
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
+/// 获取 Option 内部的类型
+fn get_option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(seg) = type_path.path.segments.last() {
+            if seg.ident == "Option" {
+                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(inner_ty);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
