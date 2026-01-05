@@ -346,8 +346,10 @@ fn sql_type_to_rust(col: &ColumnInfo) -> String {
         // 字符串类型
         "VARCHAR" | "TEXT" | "CHAR" | "CHARACTER VARYING" | "CHARACTER" | "LONGTEXT"
         | "MEDIUMTEXT" | "TINYTEXT" | "NVARCHAR" | "NCHAR" => "String",
-        // 数值类型
-        "DECIMAL" | "NUMERIC" | "DOUBLE PRECISION" | "REAL" | "DOUBLE" => "f64",
+        // 高精度数值类型 - DECIMAL 和 NUMERIC 使用 bigdecimal
+        "DECIMAL" | "NUMERIC" => "bigdecimal::BigDecimal",
+        // 浮点数类型
+        "DOUBLE PRECISION" | "REAL" | "DOUBLE" => "f64",
         "FLOAT" | "FLOAT4" => "f32",
         "MONEY" => "f64",
         // 布尔类型（这里处理的是没有长度信息的 BIT 类型，已经在上面处理了 TINYINT(1) 和 BIT(1)）

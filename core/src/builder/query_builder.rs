@@ -1,5 +1,6 @@
 use crate::db_pool::DbDriver;
 use crate::utils::escape_identifier;
+use bigdecimal::BigDecimal;
 use std::fmt::Write;
 
 /// 绑定值，用于安全地传递参数
@@ -18,6 +19,7 @@ pub enum BindValue {
     Float32(f32),
     Bool(bool),
     Bytes(Vec<u8>),
+    BigDecimal(BigDecimal),
     Null,
 }
 
@@ -37,6 +39,7 @@ impl BindValue {
             BindValue::Float32(f) => f.to_string(),
             BindValue::Bool(b) => b.to_string(),
             BindValue::Bytes(_) => "BLOB".to_string(), // 二进制数据不能直接转换为 SQL 字符串
+            BindValue::BigDecimal(d) => d.to_string(),
             BindValue::Null => "NULL".to_string(),
         }
     }
@@ -1015,6 +1018,18 @@ impl From<Vec<u8>> for BindValue {
 impl From<&[u8]> for BindValue {
     fn from(b: &[u8]) -> Self {
         BindValue::Bytes(b.to_vec())
+    }
+}
+
+impl From<BigDecimal> for BindValue {
+    fn from(d: BigDecimal) -> Self {
+        BindValue::BigDecimal(d)
+    }
+}
+
+impl From<&BigDecimal> for BindValue {
+    fn from(d: &BigDecimal) -> Self {
+        BindValue::BigDecimal(d.clone())
     }
 }
 

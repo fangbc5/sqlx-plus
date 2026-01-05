@@ -60,6 +60,10 @@ macro_rules! apply_bind_value {
             $crate::builder::query_builder::BindValue::Bytes(b) => {
                 $query = $query.bind(b);
             }
+            $crate::builder::query_builder::BindValue::BigDecimal(d) => {
+                // BigDecimal 通过字符串绑定，数据库会自动转换为 DECIMAL/NUMERIC 类型
+                $query = $query.bind(d.to_string());
+            }
             $crate::builder::query_builder::BindValue::Null => {
                 $query = $query.bind(Option::<String>::None);
             }

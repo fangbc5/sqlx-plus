@@ -1,25 +1,21 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
-use syn::{parse_file, Fields, Type, TypePath};
 use syn::parse::Parser;
+use syn::{parse_file, Fields, Type, TypePath};
 
 /// 从 Rust 模型文件生成建表 SQL
 pub struct SqlGenerator;
 
 impl SqlGenerator {
     /// 从模型文件生成建表 SQL
-    pub fn generate_create_table(
-        model_file: &Path,
-        database: &str,
-    ) -> Result<String> {
+    pub fn generate_create_table(model_file: &Path, database: &str) -> Result<String> {
         // 读取文件内容
         let content = fs::read_to_string(model_file)
             .with_context(|| format!("Failed to read file: {:?}", model_file))?;
 
         // 解析 Rust 代码
-        let ast = parse_file(&content)
-            .context("Failed to parse Rust file")?;
+        let ast = parse_file(&content).context("Failed to parse Rust file")?;
 
         // 查找带有 #[model(...)] 属性的结构体
         let mut create_statements = Vec::new();
@@ -52,7 +48,8 @@ impl SqlGenerator {
         database: &str,
     ) -> Result<String> {
         // 解析 #[model(...)] 属性
-        let (table_name, pk_field, _soft_delete_field, table_comment) = Self::parse_model_attr(model_attr)?;
+        let (table_name, pk_field, _soft_delete_field, table_comment) =
+            Self::parse_model_attr(model_attr)?;
 
         // 获取字段
         let fields = match &struct_item.fields {
@@ -64,11 +61,12 @@ impl SqlGenerator {
         let mut column_defs = Vec::new();
         let mut indexes: Vec<(String, String)> = Vec::new(); // 单字段索引：(索引名, 字段名)
         let mut unique_indexes: Vec<(String, String)> = Vec::new(); // 单字段唯一索引：(索引名, 字段名)
-        // 联合索引：索引名 -> (字段名, 顺序) 列表
-        let mut composite_indexes: std::collections::HashMap<String, Vec<(String, i32)>> = std::collections::HashMap::new();
+                                                                    // 联合索引：索引名 -> (字段名, 顺序) 列表
+        let mut composite_indexes: std::collections::HashMap<String, Vec<(String, i32)>> =
+            std::collections::HashMap::new();
         // PostgreSQL 的字段注释：(字段名, 注释)
         let mut postgres_comments: Vec<(String, String)> = Vec::new();
-        
+
         for (field_index, field) in fields.iter().enumerate() {
             let field_name = field.ident.as_ref().unwrap();
             let field_name_str = field_name.to_string();
@@ -81,10 +79,10 @@ impl SqlGenerator {
 
             // 解析字段的 column 属性
             let column_meta = Self::parse_column_attr(&field.attrs)?;
-            
+
             // 从字段类型推断 SQL 类型
             let mut sql_type = Self::rust_type_to_sql(&field.ty, database)?;
-            
+
             // 如果指定了 length，更新 SQL 类型（主要用于 VARCHAR）
             // 注意：这个检查要在 TEXT 类型判断之前，因为如果指定了 length，就不应该使用 TEXT
             if let Some(length) = column_meta.length {
@@ -108,10 +106,10 @@ impl SqlGenerator {
                     }
                 }
             }
-            
+
             // 判断是否可空（Option<T> 类型是可空的，但如果设置了 not_null，则不可空）
             let nullable = Self::is_option_type(&field.ty) && !column_meta.not_null;
-            
+
             // 判断是否是主键
             let is_pk = field_name_str == pk_field;
 
@@ -128,12 +126,8 @@ impl SqlGenerator {
 
             // 默认值处理
             if let Some(ref default) = column_meta.default {
-                let default_sql = Self::format_default_value(
-                    default,
-                    &field.ty,
-                    &sql_type,
-                    database,
-                )?;
+                let default_sql =
+                    Self::format_default_value(default, &field.ty, &sql_type, database)?;
                 col_def.push_str(&format!(" DEFAULT {}", default_sql));
             }
 
@@ -149,9 +143,15 @@ impl SqlGenerator {
                     "postgres" => {
                         // PostgreSQL 使用 SERIAL 或 BIGSERIAL
                         if sql_type.contains("BIGINT") {
-                            col_def = format!("    {} BIGSERIAL", Self::escape_identifier(database, &field_name_str));
+                            col_def = format!(
+                                "    {} BIGSERIAL",
+                                Self::escape_identifier(database, &field_name_str)
+                            );
                         } else if sql_type.contains("INT") {
-                            col_def = format!("    {} SERIAL", Self::escape_identifier(database, &field_name_str));
+                            col_def = format!(
+                                "    {} SERIAL",
+                                Self::escape_identifier(database, &field_name_str)
+                            );
                         }
                     }
                     _ => {}
@@ -204,14 +204,14 @@ impl SqlGenerator {
                 } else {
                     order
                 };
-                
+
                 // 联合索引默认不是唯一的（unique 属性只影响单独索引）
                 composite_indexes
                     .entry(combine_index_name.clone())
                     .or_insert_with(Vec::new)
                     .push((field_name_str.clone(), final_order));
             }
-            
+
             // 2. 处理单独索引
             // 逻辑：
             // - 如果设置了 unique，创建唯一索引（不管是否有 index）
@@ -375,7 +375,8 @@ impl SqlGenerator {
         if database == "postgres" {
             if let Some(ref comment) = table_comment {
                 // 判断是否需要添加换行
-                let needs_newline = has_single_indexes || has_composite_indexes || has_postgres_comments;
+                let needs_newline =
+                    has_single_indexes || has_composite_indexes || has_postgres_comments;
                 if needs_newline {
                     sql.push_str("\n\n");
                 } else {
@@ -410,7 +411,9 @@ impl SqlGenerator {
     }
 
     /// 解析 #[model(...)] 属性
-    fn parse_model_attr(attr: &syn::Attribute) -> Result<(String, String, Option<String>, Option<String>)> {
+    fn parse_model_attr(
+        attr: &syn::Attribute,
+    ) -> Result<(String, String, Option<String>, Option<String>)> {
         let mut table_name = None;
         let mut pk_field = None;
         let mut soft_delete_field = None;
@@ -467,7 +470,7 @@ impl SqlGenerator {
     }
 
     /// 格式化默认值为 SQL 格式
-    /// 
+    ///
     /// 处理规则：
     /// 1. 函数调用（CURRENT_TIMESTAMP, NOW()）直接使用
     /// 2. 空字符串使用 ''
@@ -525,13 +528,13 @@ impl SqlGenerator {
     }
 
     /// 格式化布尔类型默认值
-    /// 
+    ///
     /// 支持的输入格式：
     /// - "0", "1"
     /// - "false", "true", "FALSE", "TRUE"
     /// - "b'0'", "b'1'" (PostgreSQL/MySQL 位字符串)
     /// - "b\'0\'", "b\'1\'" (转义的位字符串)
-    /// 
+    ///
     /// 输出格式：
     /// - PostgreSQL BOOLEAN: "FALSE" 或 "TRUE"
     /// - MySQL TINYINT(1): "0" 或 "1"
@@ -542,12 +545,13 @@ impl SqlGenerator {
         let unescaped = default.replace("\\'", "'").replace("\\\"", "\"");
 
         // 处理位字符串字面量 b'0' 或 b'1'
-        let cleaned = if unescaped.starts_with("b'") && unescaped.ends_with('\'') && unescaped.len() >= 4 {
-            // 提取 b'0' 或 b'1' 中的数字部分
-            unescaped[2..unescaped.len() - 1].to_string()
-        } else {
-            unescaped
-        };
+        let cleaned =
+            if unescaped.starts_with("b'") && unescaped.ends_with('\'') && unescaped.len() >= 4 {
+                // 提取 b'0' 或 b'1' 中的数字部分
+                unescaped[2..unescaped.len() - 1].to_string()
+            } else {
+                unescaped
+            };
 
         // 转换为标准格式
         let bool_value = match cleaned.as_str() {
@@ -565,7 +569,10 @@ impl SqlGenerator {
                     } else if upper == "FALSE" {
                         false
                     } else {
-                        eprintln!("Warning: Cannot parse boolean default value '{}', using false", default);
+                        eprintln!(
+                            "Warning: Cannot parse boolean default value '{}', using false",
+                            default
+                        );
                         false
                     }
                 }
@@ -581,7 +588,10 @@ impl SqlGenerator {
             } else {
                 "FALSE".to_string()
             }
-        } else if (sql_type_upper == "BIT(1)" || (sql_type_upper.starts_with("BIT") && sql_type_upper.contains("(1)"))) && database == "mysql" {
+        } else if (sql_type_upper == "BIT(1)"
+            || (sql_type_upper.starts_with("BIT") && sql_type_upper.contains("(1)")))
+            && database == "mysql"
+        {
             // MySQL BIT(1) 使用位字符串格式 b'0' 或 b'1'
             if bool_value {
                 "b'1'".to_string()
@@ -613,7 +623,10 @@ impl SqlGenerator {
                     if segment.ident == "Option" {
                         if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
                             if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                                if let Type::Path(TypePath { path: inner_path, .. }) = inner_ty {
+                                if let Type::Path(TypePath {
+                                    path: inner_path, ..
+                                }) = inner_ty
+                                {
                                     if let Some(inner_segment) = inner_path.segments.last() {
                                         if inner_segment.ident == "bool" {
                                             return true;
@@ -656,7 +669,7 @@ impl SqlGenerator {
                 }
             }
         }
-        
+
         let inner_ty = ty;
 
         let type_str = quote::quote!(#inner_ty).to_string();
@@ -720,6 +733,17 @@ impl SqlGenerator {
                 "sqlite" => "REAL",
                 _ => "FLOAT",
             },
+            // 高精度数值类型 - bigdecimal
+            _ if type_str_clean.contains("bigdecimal::BigDecimal")
+                || type_str_clean.contains("BigDecimal") =>
+            {
+                match database {
+                    "mysql" => "DECIMAL(10,2)",    // MySQL DECIMAL 最大精度
+                    "postgres" => "NUMERIC(10,2)", // PostgreSQL NUMERIC 最大精度
+                    "sqlite" => "TEXT", // SQLite 使用 TEXT 存储 BigDecimal（通过字符串）
+                    _ => "DECIMAL(10,2)",
+                }
+            }
             // 布尔类型
             "bool" => match database {
                 "mysql" => "TINYINT(1)",
@@ -728,8 +752,9 @@ impl SqlGenerator {
                 _ => "BOOLEAN",
             },
             // 日期时间类型 - 统一使用带时区的
-            _ if type_str_clean.contains("chrono::DateTime<chrono::Utc>") 
-                || type_str_clean.contains("DateTime<Utc>") => {
+            _ if type_str_clean.contains("chrono::DateTime<chrono::Utc>")
+                || type_str_clean.contains("DateTime<Utc>") =>
+            {
                 match database {
                     "mysql" => "TIMESTAMP(3)", // MySQL 的 TIMESTAMP 是带时区的，使用 (3) 以兼容更多版本
                     "postgres" => "TIMESTAMP WITH TIME ZONE",
@@ -737,8 +762,9 @@ impl SqlGenerator {
                     _ => "TIMESTAMP WITH TIME ZONE",
                 }
             }
-            _ if type_str_clean.contains("chrono::NaiveDateTime") 
-                || type_str_clean.contains("NaiveDateTime") => {
+            _ if type_str_clean.contains("chrono::NaiveDateTime")
+                || type_str_clean.contains("NaiveDateTime") =>
+            {
                 // NaiveDateTime 也转换为带时区的（根据用户要求）
                 match database {
                     "mysql" => "TIMESTAMP(3)", // MySQL 的 TIMESTAMP 是带时区的，使用 (3) 以兼容更多版本
@@ -747,8 +773,9 @@ impl SqlGenerator {
                     _ => "TIMESTAMP WITH TIME ZONE",
                 }
             }
-            _ if type_str_clean.contains("chrono::NaiveDate") 
-                || type_str_clean.contains("NaiveDate") => {
+            _ if type_str_clean.contains("chrono::NaiveDate")
+                || type_str_clean.contains("NaiveDate") =>
+            {
                 match database {
                     "mysql" => "DATE",
                     "postgres" => "DATE",
@@ -756,8 +783,9 @@ impl SqlGenerator {
                     _ => "DATE",
                 }
             }
-            _ if type_str_clean.contains("chrono::NaiveTime") 
-                || type_str_clean.contains("NaiveTime") => {
+            _ if type_str_clean.contains("chrono::NaiveTime")
+                || type_str_clean.contains("NaiveTime") =>
+            {
                 match database {
                     "mysql" => "TIME(3)", // 使用 (3) 以兼容更多 MySQL 版本
                     "postgres" => "TIME WITH TIME ZONE",
@@ -766,8 +794,9 @@ impl SqlGenerator {
                 }
             }
             // JSON 类型
-            _ if type_str_clean.contains("serde_json::Value") 
-                || type_str_clean.contains("Value") => {
+            _ if type_str_clean.contains("serde_json::Value")
+                || type_str_clean.contains("Value") =>
+            {
                 match database {
                     "mysql" => "JSON",
                     "postgres" => "JSONB",
@@ -776,8 +805,7 @@ impl SqlGenerator {
                 }
             }
             // UUID 类型
-            _ if type_str_clean.contains("uuid::Uuid") 
-                || type_str_clean.contains("Uuid") => {
+            _ if type_str_clean.contains("uuid::Uuid") || type_str_clean.contains("Uuid") => {
                 match database {
                     "mysql" => "CHAR(36)",
                     "postgres" => "UUID",
@@ -786,17 +814,18 @@ impl SqlGenerator {
                 }
             }
             // 二进制类型
-            _ if type_str_clean.contains("Vec<u8>") => {
-                match database {
-                    "mysql" => "BLOB",
-                    "postgres" => "BYTEA",
-                    "sqlite" => "BLOB",
-                    _ => "BLOB",
-                }
-            }
+            _ if type_str_clean.contains("Vec<u8>") => match database {
+                "mysql" => "BLOB",
+                "postgres" => "BYTEA",
+                "sqlite" => "BLOB",
+                _ => "BLOB",
+            },
             // 默认返回 VARCHAR(255)
             _ => {
-                eprintln!("Warning: Unknown type '{}', using VARCHAR(255) as default", type_str_clean);
+                eprintln!(
+                    "Warning: Unknown type '{}', using VARCHAR(255) as default",
+                    type_str_clean
+                );
                 match database {
                     "mysql" => "VARCHAR(255)",
                     "postgres" => "VARCHAR(255)",
@@ -812,11 +841,12 @@ impl SqlGenerator {
     /// 解析字段的 column 属性
     fn parse_column_attr(attrs: &[syn::Attribute]) -> Result<ColumnMeta> {
         let mut meta = ColumnMeta::default();
-        
+
         for attr in attrs {
             if attr.path().is_ident("column") {
                 if let syn::Meta::List(list) = &attr.meta {
-                    let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+                    let parser =
+                        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
                     if let Ok(metas) = parser.parse2(list.tokens.clone().into()) {
                         for meta_item in metas {
                             match meta_item {
@@ -877,7 +907,8 @@ impl SqlGenerator {
                                             // 2. "index_name:order" - 指定名称和顺序
                                             if let Some((name, order_str)) = value.split_once(':') {
                                                 if let Ok(order) = order_str.trim().parse::<i32>() {
-                                                    meta.combine_index = Some((name.to_string(), order));
+                                                    meta.combine_index =
+                                                        Some((name.to_string(), order));
                                                 } else {
                                                     // 如果解析顺序失败，只使用名称，顺序为 0
                                                     meta.combine_index = Some((value, 0));
@@ -905,7 +936,7 @@ impl SqlGenerator {
                 }
             }
         }
-        
+
         Ok(meta)
     }
 
@@ -934,4 +965,3 @@ struct ColumnMeta {
     soft_delete: bool,
     comment: Option<String>, // 字段注释
 }
-

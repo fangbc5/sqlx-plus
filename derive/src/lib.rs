@@ -834,9 +834,21 @@ fn is_option_type(ty: &syn::Type) -> bool {
 }
 
 /// 检查类型是否是 BindValue 支持的基本类型
-/// 支持的类型：String, i64, i32, i16, f64, f32, bool, Vec<u8>
+/// 支持的类型：String, i64, i32, i16, f64, f32, bool, Vec<u8>, bigdecimal::BigDecimal
 fn is_bind_value_supported_type(ty: &syn::Type) -> bool {
     if let syn::Type::Path(type_path) = ty {
+        // 检查是否是 bigdecimal::BigDecimal
+        if type_path.path.segments.len() == 2 {
+            if let (Some(first), Some(last)) = (
+                type_path.path.segments.first(),
+                type_path.path.segments.last(),
+            ) {
+                if first.ident == "bigdecimal" && last.ident == "BigDecimal" {
+                    return true;
+                }
+            }
+        }
+
         if let Some(seg) = type_path.path.segments.last() {
             let type_name = seg.ident.to_string();
             // 检查是否是支持的基本类型
