@@ -157,16 +157,16 @@ where
 #[derive(Debug, Clone)]
 pub struct Page<T> {
     pub items: Vec<T>,
-    pub total: u64,
-    pub page: u64,
-    pub size: u64,
-    pub pages: u64,
+    pub total: i64,
+    pub page: u32,
+    pub size: u32,
+    pub pages: u32,
 }
 
 impl<T> Page<T> {
-    pub fn new(items: Vec<T>, total: u64, page: u64, size: u64) -> Self {
+    pub fn new(items: Vec<T>, total: i64, page: u32, size: u32) -> Self {
         let pages = if size > 0 {
-            (total + size - 1) / size
+            ((total as u64 + size as u64 - 1) / size as u64) as u32
         } else {
             0
         };
@@ -640,8 +640,8 @@ where
 pub async fn paginate<'e, 'c: 'e, DB, M, E>(
     executor: E,
     mut builder: QueryBuilder,
-    page: u64,
-    size: u64,
+    page: u32,
+    size: u32,
 ) -> Result<Page<M>>
 where
     DB: Database + DatabaseInfo,
@@ -664,7 +664,7 @@ where
     Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
 {
-    let offset = (page - 1) * size;
+    let offset = ((page as u64).saturating_sub(1) * size as u64) as u32;
     let driver = DB::get_driver();
     let escaped_table = DB::escape_identifier(M::TABLE);
 
@@ -683,7 +683,6 @@ where
     let executor_clone = executor.clone();
     let row = count_query.fetch_one(executor_clone).await?;
     let total: i64 = row.get(0usize);
-    let total = total as u64;
 
     // 执行分页查询获取数据
     let data_sql = builder.clone().into_paginated_sql(driver, size, offset);

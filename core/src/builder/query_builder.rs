@@ -884,7 +884,7 @@ impl QueryBuilder {
         builder.into_sql(driver)
     }
 
-    pub fn into_paginated_sql(&self, driver: DbDriver, limit: u64, offset: u64) -> String {
+    pub fn into_paginated_sql(&self, driver: DbDriver, limit: u32, offset: u32) -> String {
         // 分页时，page/size（limit/offset 参数）应当具有最高优先级，
         // 因此忽略构建器上通过链式设置的 limit / offset，避免重复附加。
         let mut builder = self.clone();

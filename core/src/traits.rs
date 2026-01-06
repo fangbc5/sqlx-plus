@@ -461,8 +461,8 @@ pub trait Crud:
     async fn paginate<'e, 'c: 'e, E>(
         executor: E,
         builder: QueryBuilder,
-        page: u64,
-        size: u64,
+        page: u32,
+        size: u32,
     ) -> Result<Page<Self>>
     where
         E: crate::database_type::DatabaseType
