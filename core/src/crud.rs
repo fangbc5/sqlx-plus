@@ -180,6 +180,24 @@ impl<T> Page<T> {
     }
 }
 
+/// 游标分页结果
+#[derive(Debug, Clone)]
+pub struct CursorPage<T> {
+    pub items: Vec<T>,
+    pub has_next: bool,
+    pub next_cursor: Option<i64>, // 下一次游标位置
+}
+
+impl<T> CursorPage<T> {
+    pub fn new(items: Vec<T>, has_next: bool, next_cursor: Option<i64>) -> Self {
+        Self {
+            items,
+            has_next,
+            next_cursor,
+        }
+    }
+}
+
 /// 根据 ID 查找单条记录（泛型版本）
 ///
 /// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
@@ -694,6 +712,84 @@ where
         .map_err(|e| SqlxPlusError::DatabaseError(e))?;
 
     Ok(Page::new(items, total, page, size))
+}
+
+/// 游标分页查询（泛型版本）
+/// 
+/// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
+pub async fn paginate_cursor<'e, 'c: 'e, DB, M, E>(
+    executor: E,
+    mut builder: QueryBuilder,
+    cursor: Option<i64>,
+    size: u32,
+) -> Result<CursorPage<M>>
+where
+    DB: Database + DatabaseInfo,
+    for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
+    M: Model + for<'r> sqlx::FromRow<'r, DB::Row> + Send + Unpin,
+    E: sqlx::Executor<'c, Database = DB> + Send,
+    String: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB> + for<'r> sqlx::Decode<'r, DB>,
+    i32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB> + for<'r> sqlx::Decode<'r, DB>,
+    i16: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    f64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    f32: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    bool: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Vec<u8>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    Option<String>: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
+    for<'a> &'a str: sqlx::ColumnIndex<DB::Row>,
+{
+    let driver = DB::get_driver();
+    let escaped_table = DB::escape_identifier(M::TABLE);
+
+    builder = builder.with_base_sql(format!("SELECT * FROM {}", escaped_table));
+
+    if let Some(soft_delete_field) = M::SOFT_DELETE_FIELD {
+        builder = builder.and_eq(soft_delete_field, 0);
+    }
+
+    // 默认游标从 0 开始
+    let c = cursor.unwrap_or(0);
+    // 默认行为：假设使用主键并按升序查询下一页
+    // 如果用户需要更复杂的游标逻辑，应传入 None 并在 builder 中自行追加条件
+    builder = builder.and_gt(M::PK, c);
+
+    let binds = builder.binds().to_vec();
+
+    // 核心逻辑：查询 size + 1 条，以判断是否有下一页
+    let fetch_size = size + 1;
+    let data_sql = builder.into_paginated_sql(driver, fetch_size, 0);
+
+    let query = sqlx::query::<DB>(&data_sql);
+    let query = apply_binds_to_query_generic(query, &binds);
+    let mut rows = query
+        .fetch_all(executor)
+        .await
+        .map_err(|e| SqlxPlusError::DatabaseError(e))?;
+
+    let has_next = rows.len() as u32 > size;
+    if has_next {
+        rows.pop(); // 移除多余的第 size + 1 条
+    }
+
+    let mut next_cursor = None;
+    if let Some(last_row) = rows.last() {
+        use sqlx::Row;
+        // 尝试提取最后一行的主键值作为下一次游标
+        // 先尝试按 i64 提取，如果不成功再尝试按 i32 提取
+        if let Ok(id) = last_row.try_get::<i64, &str>(M::PK) {
+            next_cursor = Some(id);
+        } else if let Ok(id) = last_row.try_get::<i32, &str>(M::PK) {
+            next_cursor = Some(id as i64);
+        }
+    }
+
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        items.push(M::from_row(&row).map_err(|e| SqlxPlusError::DatabaseError(e))?);
+    }
+
+    Ok(CursorPage::new(items, has_next, next_cursor))
 }
 
 // 注意：paginate_mysql, paginate_postgres, paginate_sqlite 等兼容层函数已移除

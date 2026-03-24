@@ -21,6 +21,7 @@ pub use traits::{Crud, Model};
 pub use builder::{
     BindValue, DeleteBuilder, InsertBuilder, QueryBuilder, UpdateBuilder, UpdateFields,
 };
+pub use crud::{CursorPage, Page};
 
 #[cfg(feature = "mysql")]
 pub use transaction::with_mysql_nested_transaction;

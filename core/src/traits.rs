@@ -510,6 +510,76 @@ pub trait Crud:
         .await
     }
 
+    /// 游标分页查询
+    ///
+    /// 相比于 `paginate`，游标分页不需要执行 `COUNT` 查询，且在深翻页时性能更好。
+    /// 
+    /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
+    /// 如果你提供了 `cursor` 参数，默认会自动为你补充 `AND pk > cursor` 的升序分页条件。
+    /// 如果这不符合你的要求（比如降序或多条件游标，以及以其他字段为游标），请传入 `None` 并在 `builder` 中自行构建相关的条件。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// use sqlxplus::QueryBuilder;
+    ///
+    /// // 第一次查询
+    /// let builder = QueryBuilder::new("").order_by("id", true);
+    /// let page = User::paginate_cursor(pool.mysql_pool(), builder, None, 10).await?;
+    ///
+    /// // 获取下一页（假设上一页最后一条记录的 id 为 `last_id`）
+    /// let builder = QueryBuilder::new("").order_by("id", true);
+    /// let next_page = User::paginate_cursor(pool.mysql_pool(), builder, Some(last_id), 10).await?;
+    /// ```
+    async fn paginate_cursor<'e, 'c: 'e, E>(
+        executor: E,
+        builder: QueryBuilder,
+        cursor: Option<i64>,
+        size: u32,
+    ) -> Result<crate::crud::CursorPage<Self>>
+    where
+        E: crate::database_type::DatabaseType
+            + sqlx::Executor<'c, Database = <E as crate::database_type::DatabaseType>::DB>
+            + Send,
+        <E as crate::database_type::DatabaseType>::DB:
+            sqlx::Database + crate::database_info::DatabaseInfo,
+        for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
+            sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        Self: for<'r> sqlx::FromRow<
+                'r,
+                <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+            > + Send
+            + Unpin,
+        String: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>
+            + for<'r> sqlx::Decode<'r, <E as crate::database_type::DatabaseType>::DB>,
+        i32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>
+            + for<'r> sqlx::Decode<'r, <E as crate::database_type::DatabaseType>::DB>,
+        i16: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        f32: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        bool: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Vec<u8>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        Option<String>: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
+        for<'a> &'a str: sqlx::ColumnIndex<
+            <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Row,
+        >,
+    {
+        crate::crud::paginate_cursor::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
+            executor, builder, cursor, size,
+        )
+        .await
+    }
+
     /// 根据 ID 物理删除记录
     ///
     /// 根据传入的 Pool 或 Transaction 自动推断数据库类型，无需显式指定数据库类型参数。
