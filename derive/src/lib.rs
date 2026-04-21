@@ -465,9 +465,9 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     placeholder_index += 1;
                 )*
 
-                // Option 字段：仅当为 Some 时参与 INSERT
+                // Option 字段：仅当为 Some 时参与 INSERT（若是 created_at/updated_at 字段无论是否 Some 均参与）
                 #(
-                    if self.#insert_option_field_names.is_some() {
+                    if self.#insert_option_field_names.is_some() || stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
                         columns.push(#insert_option_field_columns);
                         placeholders.push(DB::placeholder(placeholder_index));
                         placeholder_index += 1;
@@ -505,9 +505,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         #(
                             query = query.bind(&self.#insert_normal_field_names);
                         )*
-                        // Option 字段：仅当为 Some 时绑定
+                        // Option 字段：仅当为 Some 时绑定（created_at/updated_at 为空时默认系统时间）
                         #(
-                            if let Some(ref val) = self.#insert_option_field_names {
+                            if stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                                if let Some(ref val) = self.#insert_option_field_names {
+                                    query = query.bind(val);
+                                } else {
+                                    query = query.bind(::std::time::SystemTime::now().duration_since(::std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64);
+                                }
+                            } else if let Some(ref val) = self.#insert_option_field_names {
                                 query = query.bind(val);
                             }
                         )*
@@ -520,9 +526,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         #(
                             query = query.bind(&self.#insert_normal_field_names);
                         )*
-                        // Option 字段：仅当为 Some 时绑定
+                        // Option 字段：仅当为 Some 时绑定（created_at/updated_at 为空时默认系统时间）
                         #(
-                            if let Some(ref val) = self.#insert_option_field_names {
+                            if stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                                if let Some(ref val) = self.#insert_option_field_names {
+                                    query = query.bind(val);
+                                } else {
+                                    query = query.bind(::std::time::SystemTime::now().duration_since(::std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64);
+                                }
+                            } else if let Some(ref val) = self.#insert_option_field_names {
                                 query = query.bind(val);
                             }
                         )*
@@ -543,9 +555,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         #(
                             query = query.bind(&self.#insert_normal_field_names);
                         )*
-                        // Option 字段：仅当为 Some 时绑定
+                        // Option 字段：仅当为 Some 时绑定（created_at/updated_at 为空时默认系统时间）
                         #(
-                            if let Some(ref val) = self.#insert_option_field_names {
+                            if stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                                if let Some(ref val) = self.#insert_option_field_names {
+                                    query = query.bind(val);
+                                } else {
+                                    query = query.bind(::std::time::SystemTime::now().duration_since(::std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64);
+                                }
+                            } else if let Some(ref val) = self.#insert_option_field_names {
                                 query = query.bind(val);
                             }
                         )*
@@ -617,7 +635,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                 // Option 字段
                 #(
-                    if self.#update_option_field_names.is_some() {
+                    if self.#update_option_field_names.is_some() || stringify!(#update_option_field_names) == "updated_at" {
                         set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                         placeholder_index += 1;
                     }
@@ -640,9 +658,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 #(
                     query = query.bind(&self.#update_normal_field_names);
                 )*
-                // Option 字段：仅当为 Some 时绑定
+                // Option 字段：仅当为 Some 时绑定（updated_at 为空时默认系统时间）
                 #(
-                    if let Some(ref val) = self.#update_option_field_names {
+                    if stringify!(#update_option_field_names) == "updated_at" {
+                        if let Some(ref val) = self.#update_option_field_names {
+                            query = query.bind(val);
+                        } else {
+                            query = query.bind(::std::time::SystemTime::now().duration_since(::std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64);
+                        }
+                    } else if let Some(ref val) = self.#update_option_field_names {
                         query = query.bind(val);
                     }
                 )*
@@ -711,7 +735,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     DbDriver::Sqlite => {
                         // SQLite 不支持 DEFAULT，跳过 None 字段
                         #(
-                            if self.#update_option_field_names.is_some() {
+                            if self.#update_option_field_names.is_some() || stringify!(#update_option_field_names) == "updated_at" {
                                 set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                                 placeholder_index += 1;
                             }
@@ -720,7 +744,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     _ => {
                         // MySQL 和 PostgreSQL 使用 DEFAULT
                         #(
-                            if self.#update_option_field_names.is_some() {
+                            if self.#update_option_field_names.is_some() || stringify!(#update_option_field_names) == "updated_at" {
                                 set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                                 placeholder_index += 1;
                             } else {
@@ -747,9 +771,15 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 #(
                     query = query.bind(&self.#update_normal_field_names);
                 )*
-                // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT 或跳过）
+                // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT 或跳过，updated_at 为空时绑定当前时间）
                 #(
-                    if let Some(ref val) = self.#update_option_field_names {
+                    if stringify!(#update_option_field_names) == "updated_at" {
+                        if let Some(ref val) = self.#update_option_field_names {
+                            query = query.bind(val);
+                        } else {
+                            query = query.bind(::std::time::SystemTime::now().duration_since(::std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64);
+                        }
+                    } else if let Some(ref val) = self.#update_option_field_names {
                         query = query.bind(val);
                     }
                 )*

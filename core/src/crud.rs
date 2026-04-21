@@ -715,7 +715,7 @@ where
 }
 
 /// 游标分页查询（泛型版本）
-/// 
+///
 /// 这是统一的泛型实现，支持所有实现了 `DatabaseInfo` 的数据库类型。
 pub async fn paginate_cursor<'e, 'c: 'e, DB, M, E>(
     executor: E,

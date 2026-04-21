@@ -121,9 +121,30 @@ impl<M: Model> UpdateBuilder<M> {
         let mut set_parts = Vec::new();
         let mut set_values = Vec::new();
         let mut placeholder_index = 0;
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
 
         for field_name in &fields_to_update {
-            if let Some(bind_value) = self.model.get_field_value(field_name) {
+            if field_name == "updated_at" {
+                if let Some(bind_value) = self.model.get_field_value(field_name) {
+                    let escaped_field = DB::escape_identifier(field_name);
+                    set_parts.push(format!(
+                        "{} = {}",
+                        escaped_field,
+                        DB::placeholder(placeholder_index)
+                    ));
+                    set_values.push(bind_value);
+                    placeholder_index += 1;
+                } else {
+                    let escaped_field = DB::escape_identifier(field_name);
+                    set_parts.push(format!(
+                        "{} = {}",
+                        escaped_field,
+                        DB::placeholder(placeholder_index)
+                    ));
+                    set_values.push(super::query_builder::BindValue::Int64(now_ms));
+                    placeholder_index += 1;
+                }
+            } else if let Some(bind_value) = self.model.get_field_value(field_name) {
                 let escaped_field = DB::escape_identifier(field_name);
                 set_parts.push(format!(
                     "{} = {}",

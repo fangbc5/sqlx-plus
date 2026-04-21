@@ -110,9 +110,22 @@ impl<M: Model> InsertBuilder<M> {
         let mut field_names = Vec::new();
         let mut values = Vec::new();
         let mut placeholder_index = 0;
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
 
         for field_name in &fields_to_insert {
-            if let Some(bind_value) = self.model.get_field_value(field_name) {
+            if field_name == "created_at" || field_name == "updated_at" {
+                if let Some(bind_value) = self.model.get_field_value(field_name) {
+                    let escaped_field = DB::escape_identifier(field_name);
+                    field_names.push(escaped_field);
+                    values.push((bind_value, placeholder_index));
+                    placeholder_index += 1;
+                } else {
+                    let escaped_field = DB::escape_identifier(field_name);
+                    field_names.push(escaped_field);
+                    values.push((super::query_builder::BindValue::Int64(now_ms), placeholder_index));
+                    placeholder_index += 1;
+                }
+            } else if let Some(bind_value) = self.model.get_field_value(field_name) {
                 let escaped_field = DB::escape_identifier(field_name);
                 field_names.push(escaped_field);
                 values.push((bind_value, placeholder_index));
