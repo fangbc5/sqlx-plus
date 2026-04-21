@@ -27,7 +27,7 @@
 
 ```toml
 [dependencies]
-sqlxplus = { version = "0.2.7", features = ["mysql"] }
+sqlxplus = { version = "0.2.8", features = ["mysql"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "mysql"] }
 tokio = { version = "1.40", features = ["full"] }
 ```
@@ -522,7 +522,7 @@ MIT OR Apache-2.0
 
 ```toml
 [dependencies]
-sqlxplus = { version = "0.2.7", features = ["mysql"] }
+sqlxplus = { version = "0.2.8", features = ["mysql"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "chrono", "mysql"] }
 tokio = { version = "1.40", features = ["full"] }
 ```
