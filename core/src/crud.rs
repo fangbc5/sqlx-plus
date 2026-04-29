@@ -893,6 +893,7 @@ where
     for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
     M: Model,
     E: sqlx::Executor<'c, Database = DB> + Send,
+    i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     let soft_delete_field = M::SOFT_DELETE_FIELD.ok_or_else(|| {
         SqlxPlusError::DatabaseError(sqlx::Error::Configuration(
@@ -907,12 +908,28 @@ where
     let escaped_table = DB::escape_identifier(M::TABLE);
     let escaped_pk = DB::escape_identifier(M::PK);
     let escaped_field = DB::escape_identifier(soft_delete_field);
-    let placeholder = DB::placeholder(0);
-    let sql = format!(
-        "UPDATE {} SET {} = 1 WHERE {} = {}",
-        escaped_table, escaped_field, escaped_pk, placeholder
-    );
-    sqlx::query(&sql).bind(id).execute(executor).await?;
+
+    if let Some(updated_at_field) = M::UPDATED_AT_FIELD {
+        let escaped_updated = DB::escape_identifier(updated_at_field);
+        let placeholder_updated = DB::placeholder(0);
+        let placeholder_id = DB::placeholder(1);
+        let sql = format!(
+            "UPDATE {} SET {} = 1, {} = {} WHERE {} = {}",
+            escaped_table, escaped_field, escaped_updated, placeholder_updated, escaped_pk, placeholder_id
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        sqlx::query(&sql).bind(now).bind(id).execute(executor).await?;
+    } else {
+        let placeholder = DB::placeholder(0);
+        let sql = format!(
+            "UPDATE {} SET {} = 1 WHERE {} = {}",
+            escaped_table, escaped_field, escaped_pk, placeholder
+        );
+        sqlx::query(&sql).bind(id).execute(executor).await?;
+    }
     Ok(())
 }
 
@@ -959,6 +976,7 @@ where
     for<'a> DB::Arguments<'a>: sqlx::IntoArguments<'a, DB>,
     M: Model,
     E: sqlx::Executor<'c, Database = DB> + Send,
+    i64: sqlx::Type<DB> + for<'b> sqlx::Encode<'b, DB>,
 {
     if M::SOFT_DELETE_FIELD.is_some() {
         soft_delete_by_id::<DB, M, E>(executor, id).await

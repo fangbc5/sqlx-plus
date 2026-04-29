@@ -84,6 +84,7 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
     let mut table_name = None;
     let mut pk_field = None;
     let mut soft_delete_field = None;
+    let mut updated_at_field_attr = None;
 
     for attr in &input.attrs {
         if attr.path().is_ident("model") {
@@ -118,6 +119,14 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
                                 {
                                     soft_delete_field = Some(s.value());
                                 }
+                            } else if nv.path.is_ident("updated_at") {
+                                if let syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Str(s),
+                                    ..
+                                }) = nv.value
+                                {
+                                    updated_at_field_attr = Some(s.value());
+                                }
                             }
                         }
                     }
@@ -148,6 +157,14 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
                     {
                         soft_delete_field = Some(s.value());
                     }
+                } else if nv.path.is_ident("updated_at") {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) = &nv.value
+                    {
+                        updated_at_field_attr = Some(s.value());
+                    }
                 }
             }
         }
@@ -170,6 +187,37 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
     // 如果没有指定主键，默认使用 "id"
     let pk = pk_field.unwrap_or_else(|| "id".to_string());
 
+    // 确定 UPDATED_AT_FIELD：手动指定优先，否则自动检测列名为 "updated_at" 的字段
+    let updated_at_column: Option<String> = if updated_at_field_attr.is_some() {
+        updated_at_field_attr
+    } else {
+        let mut detected = None;
+        if let Data::Struct(DataStruct {
+            fields: Fields::Named(named_fields),
+            ..
+        }) = &input.data
+        {
+            for field in &named_fields.named {
+                if let Some(field_name) = &field.ident {
+                    let column_name = parse_column_name(&field.attrs, &field_name.to_string());
+                    if column_name == "updated_at" {
+                        detected = Some(column_name);
+                        break;
+                    }
+                }
+            }
+        }
+        detected
+    };
+
+    // 生成 UPDATED_AT_FIELD 常量
+    let updated_at_impl = if let Some(ref col) = updated_at_column {
+        let col_lit = syn::LitStr::new(col, proc_macro2::Span::call_site());
+        quote! { const UPDATED_AT_FIELD: Option<&'static str> = Some(#col_lit); }
+    } else {
+        quote! { const UPDATED_AT_FIELD: Option<&'static str> = None; }
+    };
+
     // 生成实现代码
     let expanded = if let Some(soft_delete) = soft_delete_field {
         // 如果指定了逻辑删除字段，生成包含 SOFT_DELETE_FIELD 的实现
@@ -179,6 +227,7 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
                 const TABLE: &'static str = #table;
                 const PK: &'static str = #pk;
                 const SOFT_DELETE_FIELD: Option<&'static str> = Some(#soft_delete_lit);
+                #updated_at_impl
             }
         }
     } else {
@@ -188,6 +237,7 @@ pub fn derive_model_meta(input: TokenStream) -> TokenStream {
                 const TABLE: &'static str = #table;
                 const PK: &'static str = #pk;
                 const SOFT_DELETE_FIELD: Option<&'static str> = None;
+                #updated_at_impl
             }
         }
     };
@@ -453,6 +503,11 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let table = Self::TABLE;
                 let escaped_table = DB::escape_identifier(table);
 
+                // 判断列名是否为更新时间字段的辅助闭包
+                let is_updated_at_col = |col: &str| -> bool {
+                    Self::UPDATED_AT_FIELD.map_or(col == "updated_at", |f| f == col)
+                };
+
                 // 构建列名和占位符
                 let mut columns: Vec<&str> = Vec::new();
                 let mut placeholders: Vec<String> = Vec::new();
@@ -467,7 +522,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                 // Option 字段：仅当为 Some 时参与 INSERT（若是 created_at/updated_at 字段无论是否 Some 均参与）
                 #(
-                    if self.#insert_option_field_names.is_some() || stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                    if self.#insert_option_field_names.is_some() || #insert_option_field_columns == "created_at" || is_updated_at_col(#insert_option_field_columns) {
                         columns.push(#insert_option_field_columns);
                         placeholders.push(DB::placeholder(placeholder_index));
                         placeholder_index += 1;
@@ -507,7 +562,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         )*
                         // Option 字段：仅当为 Some 时绑定（created_at/updated_at 为空时默认系统时间）
                         #(
-                            if stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                            if #insert_option_field_columns == "created_at" || is_updated_at_col(#insert_option_field_columns) {
                                 if let Some(ref val) = self.#insert_option_field_names {
                                     query = query.bind(val);
                                 } else {
@@ -528,7 +583,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         )*
                         // Option 字段：仅当为 Some 时绑定（created_at/updated_at 为空时默认系统时间）
                         #(
-                            if stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                            if #insert_option_field_columns == "created_at" || is_updated_at_col(#insert_option_field_columns) {
                                 if let Some(ref val) = self.#insert_option_field_names {
                                     query = query.bind(val);
                                 } else {
@@ -557,7 +612,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                         )*
                         // Option 字段：仅当为 Some 时绑定（created_at/updated_at 为空时默认系统时间）
                         #(
-                            if stringify!(#insert_option_field_names) == "created_at" || stringify!(#insert_option_field_names) == "updated_at" {
+                            if #insert_option_field_columns == "created_at" || is_updated_at_col(#insert_option_field_columns) {
                                 if let Some(ref val) = self.#insert_option_field_names {
                                     query = query.bind(val);
                                 } else {
@@ -623,6 +678,11 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let escaped_table = DB::escape_identifier(table);
                 let escaped_pk = DB::escape_identifier(pk);
 
+                // 判断列名是否为更新时间字段的辅助闭包
+                let is_updated_at_col = |col: &str| -> bool {
+                    Self::UPDATED_AT_FIELD.map_or(col == "updated_at", |f| f == col)
+                };
+
                 // 构建 UPDATE SET 子句（Patch 语义）
                 let mut set_parts: Vec<String> = Vec::new();
                 let mut placeholder_index = 0;
@@ -635,7 +695,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
 
                 // Option 字段
                 #(
-                    if self.#update_option_field_names.is_some() || stringify!(#update_option_field_names) == "updated_at" {
+                    if self.#update_option_field_names.is_some() || is_updated_at_col(#update_option_field_columns) {
                         set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                         placeholder_index += 1;
                     }
@@ -660,7 +720,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 )*
                 // Option 字段：仅当为 Some 时绑定（updated_at 为空时默认系统时间）
                 #(
-                    if stringify!(#update_option_field_names) == "updated_at" {
+                    if is_updated_at_col(#update_option_field_columns) {
                         if let Some(ref val) = self.#update_option_field_names {
                             query = query.bind(val);
                         } else {
@@ -720,6 +780,11 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 let escaped_table = DB::escape_identifier(table);
                 let escaped_pk = DB::escape_identifier(pk);
 
+                // 判断列名是否为更新时间字段的辅助闭包
+                let is_updated_at_col = |col: &str| -> bool {
+                    Self::UPDATED_AT_FIELD.map_or(col == "updated_at", |f| f == col)
+                };
+
                 // 构建 UPDATE SET 子句（Reset 语义）
                 let mut set_parts: Vec<String> = Vec::new();
                 let mut placeholder_index = 0;
@@ -735,7 +800,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     DbDriver::Sqlite => {
                         // SQLite 不支持 DEFAULT，跳过 None 字段
                         #(
-                            if self.#update_option_field_names.is_some() || stringify!(#update_option_field_names) == "updated_at" {
+                            if self.#update_option_field_names.is_some() || is_updated_at_col(#update_option_field_columns) {
                                 set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                                 placeholder_index += 1;
                             }
@@ -744,7 +809,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                     _ => {
                         // MySQL 和 PostgreSQL 使用 DEFAULT
                         #(
-                            if self.#update_option_field_names.is_some() || stringify!(#update_option_field_names) == "updated_at" {
+                            if self.#update_option_field_names.is_some() || is_updated_at_col(#update_option_field_columns) {
                                 set_parts.push(format!("{} = {}", DB::escape_identifier(#update_option_field_columns), DB::placeholder(placeholder_index)));
                                 placeholder_index += 1;
                             } else {
@@ -773,7 +838,7 @@ pub fn derive_crud(input: TokenStream) -> TokenStream {
                 )*
                 // Option 字段：仅当为 Some 时绑定（None 使用 DEFAULT 或跳过，updated_at 为空时绑定当前时间）
                 #(
-                    if stringify!(#update_option_field_names) == "updated_at" {
+                    if is_updated_at_col(#update_option_field_columns) {
                         if let Some(ref val) = self.#update_option_field_names {
                             query = query.bind(val);
                         } else {

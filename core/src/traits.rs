@@ -13,6 +13,8 @@ pub trait Model: Sized {
     const PK: &'static str;
     /// 逻辑删除字段名（可选），如果为 Some，则使用逻辑删除
     const SOFT_DELETE_FIELD: Option<&'static str> = None;
+    /// 更新时间字段名（可选），软删除时会自动更新此字段为当前毫秒时间戳
+    const UPDATED_AT_FIELD: Option<&'static str> = None;
 }
 
 /// Crud trait 提供了基本的 CRUD 操作
@@ -643,6 +645,8 @@ pub trait Crud:
             sqlx::Database + crate::database_info::DatabaseInfo,
         for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
             sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
     {
         crate::crud::soft_delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
             executor, id,
@@ -679,6 +683,8 @@ pub trait Crud:
             sqlx::Database + crate::database_info::DatabaseInfo,
         for<'a> <<E as crate::database_type::DatabaseType>::DB as sqlx::Database>::Arguments<'a>:
             sqlx::IntoArguments<'a, <E as crate::database_type::DatabaseType>::DB>,
+        i64: sqlx::Type<<E as crate::database_type::DatabaseType>::DB>
+            + for<'b> sqlx::Encode<'b, <E as crate::database_type::DatabaseType>::DB>,
     {
         crate::crud::delete_by_id::<<E as crate::database_type::DatabaseType>::DB, Self, E>(
             executor, id,

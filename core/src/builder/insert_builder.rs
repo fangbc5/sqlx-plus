@@ -112,8 +112,13 @@ impl<M: Model> InsertBuilder<M> {
         let mut placeholder_index = 0;
         let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
 
+        // 辅助闭包：判断字段名是否为更新时间字段
+        let is_updated_at = |name: &str| -> bool {
+            M::UPDATED_AT_FIELD.map_or(name == "updated_at", |f| f == name)
+        };
+
         for field_name in &fields_to_insert {
-            if field_name == "created_at" || field_name == "updated_at" {
+            if field_name == "created_at" || is_updated_at(field_name) {
                 if let Some(bind_value) = self.model.get_field_value(field_name) {
                     let escaped_field = DB::escape_identifier(field_name);
                     field_names.push(escaped_field);
